@@ -104,6 +104,8 @@ const EmptyTextPart = memo(() => {
   const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
   const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
   const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
+  // eslint-disable-next-line no-console
+  console.log('[NOVA_PHASE] EmptyText render', { currentPhase, label, language: i18n.language });
 
   // Original LibreChat dot: rendered via `.submitting .result-thinking:empty:last-child:after`
   // which requires result-thinking to be the LAST CHILD of <p>. Adding a sibling span
