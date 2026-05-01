@@ -16,9 +16,12 @@ import type {
   SummaryContentPart,
   TMessageContentParts,
 } from 'librechat-data-provider';
+import { useSetRecoilState } from 'recoil';
 import type { SetterOrUpdater } from 'recoil';
 import type { AnnounceOptions } from '~/common';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
+import { stripPhaseMarkers } from '~/utils';
+import store from '~/store';
 
 type TUseStepHandler = {
   announcePolite: (options: AnnounceOptions) => void;
@@ -59,6 +62,13 @@ export default function useStepHandler({
   announcePolite,
   lastAnnouncementTimeRef,
 }: TUseStepHandler) {
+  // Nova OS fork: setter for the phase indicator. updateContent strips
+  // <<<NOVA_PHASE:key>>> markers from contentPart.text on each
+  // ON_MESSAGE_DELTA before they get appended to the message body, and
+  // dispatches the most recent key here. Mirrors the strip in
+  // useEventHandlers.messageHandler for the message-event path.
+  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
+
   const toolCallIdMap = useRef(new Map<string, string | undefined>());
   const messageMap = useRef(new Map<string, TMessage>());
   const stepMap = useRef(new Map<string, Agents.RunStep>());
@@ -133,10 +143,15 @@ export default function useStepHandler({
       ContentTypes.TEXT in contentPart &&
       typeof contentPart.text === 'string'
     ) {
+      // Nova OS fork: strip phase markers from this delta's text before
+      // appending. Markers are emitted by Nova OS during the silent
+      // pre-synthesis window — they must NOT appear in the visible
+      // message body.
+      const cleanText = stripPhaseMarkers(contentPart.text, setCurrentPhase);
       const currentContent = updatedContent[index] as MessageDeltaUpdate;
       const update: MessageDeltaUpdate = {
         type: ContentTypes.TEXT,
-        text: (currentContent.text || '') + contentPart.text,
+        text: (currentContent.text || '') + cleanText,
       };
 
       if ('tool_call_ids' in contentPart && contentPart.tool_call_ids != null) {

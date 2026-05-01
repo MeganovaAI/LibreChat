@@ -28,6 +28,7 @@ import {
   setDraft,
   scrollToEnd,
   getAllContentText,
+  stripPhaseMarkers,
   addConvoToAllQueries,
   updateConvoInAllQueries,
   removeConvoFromAllQueries,
@@ -206,26 +207,9 @@ export default function useEventHandlers({
     (data: string | undefined, submission: EventSubmission) => {
       const { messages, userMessage, initialResponse, isRegenerate = false } = submission;
       // Nova OS fork: strip <<<NOVA_PHASE:key>>> markers from incoming text
-      // and dispatch the latest seen phase to the global atom that
-      // EmptyText reads. Markers are server-emitted between role chunk and
-      // first synthesis chunk to power the live "Planning… → Searching… →
-      // Generating…" indicator. Stripped here (server-side raw payload
-      // never appears in visible text). Match also tolerates partial
-      // chunk boundaries — text accumulates per chunk so any split marker
-      // resolves on a subsequent chunk; we only act on complete markers.
-      let text = data ?? '';
-      if (text.includes('<<<NOVA_PHASE:')) {
-        const re = /<<<NOVA_PHASE:([^>]+)>>>/g;
-        let lastPhase: string | null = null;
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(text)) !== null) {
-          lastPhase = m[1];
-        }
-        if (lastPhase != null) {
-          setCurrentPhase(lastPhase);
-        }
-        text = text.replace(re, '');
-      }
+      // and dispatch the latest phase to the atom EmptyText reads. Mirrors
+      // the strip in useStepHandler.updateContent for the step-event path.
+      const text = stripPhaseMarkers(data ?? '', setCurrentPhase);
       setIsSubmitting(true);
 
       const currentTime = Date.now();
