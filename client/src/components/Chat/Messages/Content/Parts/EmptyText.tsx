@@ -104,23 +104,24 @@ const EmptyTextPart = memo(() => {
   const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
   const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
   const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
-  // eslint-disable-next-line no-console
-  console.log('[NOVA_PHASE] EmptyText render', {
-    currentPhase,
-    phasesKeys: phases ? Object.keys(phases) : null,
-    indicatorTextType: typeof indicatorText,
-    language: i18n.language,
-    label,
-  });
 
+  // Original LibreChat dot: rendered via `.submitting .result-thinking:empty:last-child:after`
+  // which requires result-thinking to be the LAST CHILD of <p>. Adding a sibling span
+  // (the label) breaks the :last-child match → dot stops rendering and the label can also
+  // get clipped by the absolutely-positioned wrapper. Keep two separate <p>s — one for the
+  // dot (always rendered, structurally untouched), one for the label (only when set, sits
+  // inline next to the dot via flex). This lets the dot animation still work via the CSS
+  // hack while the label shows up reliably regardless of phase state.
   return (
     <div className="text-message flex min-h-[20px] flex-col items-start gap-3 overflow-visible">
       <div className="markdown prose dark:prose-invert light w-full break-words dark:text-gray-100">
-        <div className="absolute">
+        <div className="flex items-center gap-3">
           <p className="submitting relative">
             <span className="result-thinking" />
-            {label && <span className="ml-2 text-text-secondary">{label}</span>}
           </p>
+          {label && (
+            <span className="text-sm text-text-secondary">{label}</span>
+          )}
         </div>
       </div>
     </div>
