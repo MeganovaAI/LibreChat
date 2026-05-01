@@ -1,6 +1,6 @@
-import { memo, useEffect } from 'react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRecoilValue, useSetRecoilState } from 'recoil';
+import { useRecoilValue } from 'recoil';
 import { useGetStartupConfig } from '~/data-provider';
 import store from '~/store';
 
@@ -92,20 +92,20 @@ const EmptyTextPart = memo(() => {
   const { data: startupConfig } = useGetStartupConfig();
   const { i18n } = useTranslation();
   const currentPhase = useRecoilValue(store.currentPhaseAtom);
-  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
 
-  // Reset on mount so a phase carried over from the previous message
-  // doesn't briefly flash here. The first NOVA_PHASE marker of the new
-  // message will set it again within milliseconds.
-  useEffect(() => {
-    setCurrentPhase(null);
-  }, [setCurrentPhase]);
-
+  // Note: an earlier version reset currentPhase to null in useEffect on
+  // mount to avoid a stale phase from the previous message flashing
+  // briefly. That backfired — EmptyText unmounts and remounts multiple
+  // times during a single conversation (every time content briefly
+  // materializes then clears), and each remount fired the reset, wiping
+  // the live phase the streaming-time strip had just dispatched. The
+  // user saw "Thinking…" most of the time even after the marker stripper
+  // correctly set "synthesizing". The reset is now done in
+  // useEventHandlers — when a NEW submission starts (one event per
+  // conversation, not per render).
   const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
   const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
   const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
-  // eslint-disable-next-line no-console
-  console.log('[NOVA_PHASE] EmptyText render', { currentPhase, label, language: i18n.language });
 
   // Original LibreChat dot: rendered via `.submitting .result-thinking:empty:last-child:after`
   // which requires result-thinking to be the LAST CHILD of <p>. Adding a sibling span
