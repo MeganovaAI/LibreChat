@@ -104,6 +104,14 @@ const EmptyTextPart = memo(() => {
   const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
   const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
   const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
+  // eslint-disable-next-line no-console
+  console.log('[NOVA_PHASE] EmptyText render', {
+    currentPhase,
+    phasesKeys: phases ? Object.keys(phases) : null,
+    indicatorTextType: typeof indicatorText,
+    language: i18n.language,
+    label,
+  });
 
   return (
     <div className="text-message flex min-h-[20px] flex-col items-start gap-3 overflow-visible">
