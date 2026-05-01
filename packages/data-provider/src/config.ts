@@ -695,8 +695,15 @@ export const interfaceSchema = z
      * arrives. Useful for backends with high time-to-first-token (agentic
      * pipelines that plan + call tools before synthesizing). Empty / omitted
      * = original behavior (dot only). Wired into EmptyText.tsx.
+     *
+     * Two shapes accepted:
+     *   typingIndicatorText: "Thinking…"                       (single string, used for every locale)
+     *   typingIndicatorText:                                    (locale → text map; client picks
+     *     en: "Thinking…"                                        based on i18n.language with prefix
+     *     zh-CN: "正在处理…"                                       fallback, then `default`, then `en`,
+     *     default: "Working…"                                    then first key)
      */
-    typingIndicatorText: z.string().optional(),
+    typingIndicatorText: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
     mcpServers: mcpServersSchema.optional(),
     modelSelect: z.boolean().optional(),
     parameters: z.boolean().optional(),
