@@ -150,8 +150,18 @@ export default function useStepHandler({
       // leaves the partial half stranded in the message body forever.
       // Idempotent on already-clean accumulated text (cheap includes()).
       const currentContent = updatedContent[index] as MessageDeltaUpdate;
-      const fullText = (currentContent.text || '') + contentPart.text;
+      const priorText = currentContent.text || '';
+      const fullText = priorText + contentPart.text;
       const cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
+      // If the cleaned result is empty AND nothing real was here before,
+      // do NOT materialize an empty text content-part. Part.tsx would
+      // render <Text text=""/> for it, which unmounts <EmptyText/> and
+      // hides our phase indicator. Return the message unchanged so the
+      // empty-content placeholder stays on screen until real synthesis
+      // tokens start arriving.
+      if (cleanFull.length === 0 && priorText.length === 0) {
+        return message;
+      }
       const update: MessageDeltaUpdate = {
         type: ContentTypes.TEXT,
         text: cleanFull,

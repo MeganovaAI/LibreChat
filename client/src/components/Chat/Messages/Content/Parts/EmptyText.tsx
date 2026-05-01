@@ -115,12 +115,15 @@ const EmptyTextPart = memo(() => {
   return (
     <div className="text-message flex min-h-[20px] flex-col items-start gap-3 overflow-visible">
       <div className="markdown prose dark:prose-invert light w-full break-words dark:text-gray-100">
-        <div className="flex items-center gap-3">
-          <p className="submitting relative">
+        <div className="flex items-center">
+          {/* Wrap the dot in a fixed-width box so its absolutely-positioned
+              `:after` pseudo-element (top: -11px, ~12px tall) doesn't
+              overlap the label that follows. */}
+          <p className="submitting relative inline-block w-[18px] flex-shrink-0">
             <span className="result-thinking" />
           </p>
           {label && (
-            <span className="text-sm text-text-secondary">{label}</span>
+            <span className="ml-2 text-sm text-text-secondary">{label}</span>
           )}
         </div>
       </div>
