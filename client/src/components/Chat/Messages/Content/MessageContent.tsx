@@ -18,11 +18,24 @@ const ERROR_CONNECTION_TEXT = 'Error connecting to server, try refreshing the pa
 const DELAYED_ERROR_TIMEOUT = 5500;
 const UNFINISHED_DELAY = 250;
 
+// Nova OS fork: defense-in-depth scrub for <<<NOVA_PHASE:key>>> markers
+// at the render boundary. The streaming-time + finalHandler + history-load
+// scrubs catch most paths, but multi-turn / agent-step / sync paths can
+// still write marker text into message state. Stripping here guarantees
+// markers never reach the visible markdown regardless of how they got
+// into the message body. Cheap on already-clean text (single includes).
+const NOVA_PHASE_RE = /<<<NOVA_PHASE:[^>]+>>>/g;
+const stripPhaseMarkersForRender = (text: string): string => {
+  if (!text || !text.includes('<<<NOVA_PHASE:')) return text;
+  return text.replace(NOVA_PHASE_RE, '');
+};
+
 const parseThinkingContent = (text: string) => {
-  const thinkingMatch = text.match(/:::thinking([\s\S]*?):::/);
+  const cleanText = stripPhaseMarkersForRender(text);
+  const thinkingMatch = cleanText.match(/:::thinking([\s\S]*?):::/);
   return {
     thinkingContent: thinkingMatch ? thinkingMatch[1].trim() : '',
-    regularContent: thinkingMatch ? text.replace(/:::thinking[\s\S]*?:::/, '').trim() : text,
+    regularContent: thinkingMatch ? cleanText.replace(/:::thinking[\s\S]*?:::/, '').trim() : cleanText,
   };
 };
 
