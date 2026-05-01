@@ -439,6 +439,46 @@ export default function useEventHandlers({
 
   const finalHandler = useCallback(
     (data: TFinalResData, submission: EventSubmission) => {
+      // Nova OS fork: scrub <<<NOVA_PHASE:key>>> markers from the
+      // server-accumulated final payload. The streaming-time strip in
+      // useStepHandler.updateContent only cleans the per-chunk render
+      // state — when the server flushes the FINAL message at end-of-
+      // stream, it carries the full accumulated content (markers
+      // included), and that overwrites our cleaned version. Strip again
+      // here, in place, on .text and any text-typed content parts. No-op
+      // when no markers are present (cheap includes() check).
+      const scrubText = (s: string | undefined): string | undefined =>
+        typeof s === 'string' && s.includes('<<<NOVA_PHASE:')
+          ? s.replace(/<<<NOVA_PHASE:[^>]+>>>/g, '')
+          : s;
+      const scrubMessage = (m: TMessage | undefined): void => {
+        if (!m) return;
+        if (typeof m.text === 'string') {
+          const cleaned = scrubText(m.text);
+          if (cleaned !== m.text) m.text = cleaned ?? '';
+        }
+        if (Array.isArray(m.content)) {
+          for (const part of m.content) {
+            if (part && typeof part === 'object') {
+              const p = part as Record<string, unknown>;
+              if (typeof p.text === 'string') {
+                p.text = scrubText(p.text as string);
+              }
+              if (p.text && typeof p.text === 'object') {
+                const tv = p.text as Record<string, unknown>;
+                if (typeof tv.value === 'string') {
+                  tv.value = scrubText(tv.value as string);
+                }
+              }
+            }
+          }
+        }
+      };
+      scrubMessage(data.responseMessage);
+      if (Array.isArray(data.runMessages)) {
+        data.runMessages.forEach((m) => scrubMessage(m as TMessage));
+      }
+
       const { requestMessage, responseMessage, conversation, runMessages } = data;
       const {
         messages,
