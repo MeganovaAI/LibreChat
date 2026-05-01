@@ -1,20 +1,23 @@
-import { memo } from 'react';
+import { memo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useRecoilValue, useSetRecoilState } from 'recoil';
 import { useGetStartupConfig } from '~/data-provider';
+import store from '~/store';
+
+type LocaleMap = Record<string, string>;
+type IndicatorTextConfig = string | LocaleMap | undefined;
+type PhaseTable = Record<string, string | LocaleMap> | undefined;
 
 /**
- * Pick the localized typing-indicator text from the configured value.
+ * Pick a localized string from a (string | locale-map) config value.
  *
  * - String: returned as-is for every locale.
  * - Object map (locale → text): exact-match first, then language-prefix
  *   fallback (`zh-CN` → `zh`), then `default`, then `en`, then the first
  *   key. Returns undefined only when the map is empty.
- *
- * Kept in this file so the rendering component remains a pure function
- * of (config, current language) — no extra hooks or providers needed.
  */
-function pickIndicatorText(
-  raw: string | Record<string, string> | undefined,
+function pickLocalized(
+  raw: string | LocaleMap | undefined,
   language: string,
 ): string | undefined {
   if (typeof raw === 'string') {
@@ -41,31 +44,74 @@ function pickIndicatorText(
 }
 
 /**
+ * Resolve the phase label to render right now.
+ * Resolution order:
+ *   1. If currentPhase is set AND maps to a configured entry in
+ *      typingIndicatorPhases (exact key OR `tool:*` wildcard) → that label.
+ *   2. If currentPhase is set with `tool:<name>` shape but no specific
+ *      entry → auto-fallback to "Running <name>…" (auto-localized via
+ *      the `default` / `en` keys of typingIndicatorPhases.tool when set).
+ *   3. Otherwise → typingIndicatorText (the static fallback shown before
+ *      any phase event arrives).
+ */
+function resolveLabel(
+  currentPhase: string | null,
+  phases: PhaseTable,
+  text: IndicatorTextConfig,
+  language: string,
+): string | undefined {
+  if (currentPhase && phases) {
+    if (phases[currentPhase]) {
+      return pickLocalized(phases[currentPhase], language);
+    }
+    if (currentPhase.startsWith('tool:')) {
+      const toolName = currentPhase.slice('tool:'.length);
+      const fallback = phases['tool:*'] ?? phases.tool;
+      if (fallback) {
+        const template = pickLocalized(fallback, language);
+        return template ? template.replace('{tool}', toolName) : undefined;
+      }
+    }
+  }
+  return pickLocalized(text, language);
+}
+
+/**
  * Streaming cursor placeholder — shown while a response is being generated
  * but before the first content chunk arrives. No bottom margin to match
  * Container's structure and prevent CLS.
  *
- * Nova OS fork: when interface.typingIndicatorText is set in librechat.yaml,
- * the localized text is rendered to the right of the dot so users on slow
- * agentic backends (brain plan + tool calls before synthesis) see something
- * other than a stationary dot during the silent pre-token phase.
+ * Nova OS fork:
+ * - A1: interface.typingIndicatorText (string OR locale-map) → static
+ *   label rendered next to the dot for the entire pre-token wait.
+ * - B2: interface.typingIndicatorPhases (key → string | locale-map) +
+ *   <<<NOVA_PHASE:key>>> markers stripped upstream → live label that
+ *   updates as the agent moves through planning → tool calls → synthesis.
  */
 const EmptyTextPart = memo(() => {
   const { data: startupConfig } = useGetStartupConfig();
   const { i18n } = useTranslation();
-  const indicatorText = pickIndicatorText(
-    startupConfig?.interface?.typingIndicatorText as string | Record<string, string> | undefined,
-    i18n.language,
-  );
+  const currentPhase = useRecoilValue(store.currentPhaseAtom);
+  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
+
+  // Reset on mount so a phase carried over from the previous message
+  // doesn't briefly flash here. The first NOVA_PHASE marker of the new
+  // message will set it again within milliseconds.
+  useEffect(() => {
+    setCurrentPhase(null);
+  }, [setCurrentPhase]);
+
+  const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
+  const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
+  const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
+
   return (
     <div className="text-message flex min-h-[20px] flex-col items-start gap-3 overflow-visible">
       <div className="markdown prose dark:prose-invert light w-full break-words dark:text-gray-100">
         <div className="absolute">
           <p className="submitting relative">
             <span className="result-thinking" />
-            {indicatorText && (
-              <span className="ml-2 text-text-secondary">{indicatorText}</span>
-            )}
+            {label && <span className="ml-2 text-text-secondary">{label}</span>}
           </p>
         </div>
       </div>

@@ -704,6 +704,32 @@ export const interfaceSchema = z
      *     default: "Working…"                                    then first key)
      */
     typingIndicatorText: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
+    /**
+     * Nova OS fork (B2): per-phase labels for the live typing indicator.
+     * Each entry is keyed by the phase semantic key the server emits via
+     * <<<NOVA_PHASE:key>>> markers (planning / tool:<name> / synthesizing /
+     * etc.). Value is either a single string OR a locale-map (same shape
+     * as typingIndicatorText). The special key `tool:*` (or `tool`) is a
+     * fallback template — `{tool}` placeholder gets replaced with the
+     * actual tool name for any tool:<X> not configured explicitly.
+     *
+     *   typingIndicatorPhases:
+     *     planning:
+     *       en: "Planning your answer…"
+     *       zh-CN: "正在规划答案…"
+     *     "tool:web_search":
+     *       en: "Searching the web…"
+     *       zh-CN: "搜索网络…"
+     *     "tool:*":
+     *       en: "Running {tool}…"
+     *       zh-CN: "执行 {tool} 中…"
+     *     synthesizing:
+     *       en: "Generating response…"
+     *       zh-CN: "整理回答…"
+     */
+    typingIndicatorPhases: z
+      .record(z.string(), z.union([z.string(), z.record(z.string(), z.string())]))
+      .optional(),
     mcpServers: mcpServersSchema.optional(),
     modelSelect: z.boolean().optional(),
     parameters: z.boolean().optional(),

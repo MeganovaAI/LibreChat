@@ -38,9 +38,12 @@ export async function loadDefaultInterface({
     termsOfService: interfaceConfig?.termsOfService ?? defaults.termsOfService,
     mcpServers: interfaceConfig?.mcpServers ?? defaults.mcpServers,
     customWelcome: interfaceConfig?.customWelcome ?? defaults.customWelcome,
-    // Nova OS fork: forward typingIndicatorText through to the client so
-    // EmptyText.tsx can render it during the silent pre-token phase.
+    // Nova OS fork: forward typingIndicatorText (A1, static fallback) +
+    // typingIndicatorPhases (B2, per-phase live labels) through to the
+    // client so EmptyText.tsx can render them during the silent pre-token
+    // phase.
     typingIndicatorText: interfaceConfig?.typingIndicatorText,
+    typingIndicatorPhases: interfaceConfig?.typingIndicatorPhases,
 
     // Permissions - only include if explicitly configured
     bookmarks: interfaceConfig?.bookmarks,

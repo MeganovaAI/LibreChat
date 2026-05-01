@@ -180,6 +180,11 @@ export default function useEventHandlers({
   const { announcePolite } = useLiveAnnouncer();
   const applyAgentTemplate = useApplyAgentTemplate();
   const setAbortScroll = useSetRecoilState(store.abortScroll);
+  // Nova OS fork: setter for the phase indicator that EmptyText subscribes
+  // to. messageHandler dispatches as it strips <<<NOVA_PHASE:key>>> markers
+  // from incoming text; cancel/error/final handlers reset to null so the
+  // next message starts with the static fallback.
+  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -200,7 +205,27 @@ export default function useEventHandlers({
   const messageHandler = useCallback(
     (data: string | undefined, submission: EventSubmission) => {
       const { messages, userMessage, initialResponse, isRegenerate = false } = submission;
-      const text = data ?? '';
+      // Nova OS fork: strip <<<NOVA_PHASE:key>>> markers from incoming text
+      // and dispatch the latest seen phase to the global atom that
+      // EmptyText reads. Markers are server-emitted between role chunk and
+      // first synthesis chunk to power the live "Planning… → Searching… →
+      // Generating…" indicator. Stripped here (server-side raw payload
+      // never appears in visible text). Match also tolerates partial
+      // chunk boundaries — text accumulates per chunk so any split marker
+      // resolves on a subsequent chunk; we only act on complete markers.
+      let text = data ?? '';
+      if (text.includes('<<<NOVA_PHASE:')) {
+        const re = /<<<NOVA_PHASE:([^>]+)>>>/g;
+        let lastPhase: string | null = null;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(text)) !== null) {
+          lastPhase = m[1];
+        }
+        if (lastPhase != null) {
+          setCurrentPhase(lastPhase);
+        }
+        text = text.replace(re, '');
+      }
       setIsSubmitting(true);
 
       const currentTime = Date.now();
@@ -228,7 +253,7 @@ export default function useEventHandlers({
         ]);
       }
     },
-    [setMessages, announcePolite, setIsSubmitting],
+    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase],
   );
 
   const cancelHandler = useCallback(
