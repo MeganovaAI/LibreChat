@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRecoilValue } from 'recoil';
 import { useGetStartupConfig } from '~/data-provider';
@@ -107,6 +107,27 @@ const EmptyTextPart = memo(() => {
   const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
   const label = resolveLabel(currentPhase, phases, indicatorText, i18n.language);
 
+  // Elapsed time per phase. Reset whenever currentPhase changes; tick once
+  // per second to update the rendered "(Ns)" suffix. Hidden until ≥1s so
+  // very-fast phases don't flash "(0s)" briefly. The phase-key string is
+  // the trigger — both null→"planning" and "planning"→"synthesizing"
+  // restart the timer.
+  const phaseStartedAt = useRef<number>(Date.now());
+  const lastPhaseKey = useRef<string | null>(currentPhase);
+  if (lastPhaseKey.current !== currentPhase) {
+    phaseStartedAt.current = Date.now();
+    lastPhaseKey.current = currentPhase;
+  }
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    const tick = () => {
+      setElapsedSec(Math.floor((Date.now() - phaseStartedAt.current) / 1000));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [currentPhase]);
+
   // Original LibreChat dot: rendered via `.submitting .result-thinking:empty:last-child:after`
   // which requires result-thinking to be the LAST CHILD of <p>. Adding a sibling span
   // (the label) breaks the :last-child match → dot stops rendering and the label can also
@@ -125,7 +146,12 @@ const EmptyTextPart = memo(() => {
             <span className="result-thinking" />
           </p>
           {label && (
-            <span className="ml-2 text-sm text-text-secondary">{label}</span>
+            <span className="ml-2 text-sm text-text-secondary">
+              {label}
+              {elapsedSec >= 1 && (
+                <span className="ml-1 text-text-tertiary">({elapsedSec}s)</span>
+              )}
+            </span>
           )}
         </div>
       </div>

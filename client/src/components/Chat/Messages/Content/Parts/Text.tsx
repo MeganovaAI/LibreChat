@@ -17,7 +17,19 @@ type ContentType =
   | ReactElement<React.ComponentProps<typeof MarkdownLite>>
   | ReactElement;
 
-const TextPart = memo(function TextPart({ text, isCreatedByUser, showCursor }: TextPartProps) {
+// Nova OS fork: scrub <<<NOVA_PHASE:key>>> markers at the render
+// boundary. Text is the primary path for streaming assistant output —
+// several upstream paths (multi-turn agent steps, server finalization,
+// MongoDB-persisted history) can leak markers into message text. Scrub
+// here guarantees they never reach visible markdown regardless of how
+// they got into state. Cheap on already-clean text via includes() check.
+const NOVA_PHASE_RE = /<<<NOVA_PHASE:[^>]+>>>/g;
+
+const TextPart = memo(function TextPart({ text: rawText, isCreatedByUser, showCursor }: TextPartProps) {
+  const text = useMemo(
+    () => (rawText && rawText.includes('<<<NOVA_PHASE:') ? rawText.replace(NOVA_PHASE_RE, '') : rawText),
+    [rawText],
+  );
   const { isSubmitting = false, isLatestMessage = false } = useMessageContext();
   const enableUserMsgMarkdown = useRecoilValue(store.enableUserMsgMarkdown);
   const showCursorState = useMemo(() => showCursor && isSubmitting, [showCursor, isSubmitting]);
