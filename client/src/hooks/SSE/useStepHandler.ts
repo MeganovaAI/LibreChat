@@ -143,15 +143,18 @@ export default function useStepHandler({
       ContentTypes.TEXT in contentPart &&
       typeof contentPart.text === 'string'
     ) {
-      // Nova OS fork: strip phase markers from this delta's text before
-      // appending. Markers are emitted by Nova OS during the silent
-      // pre-synthesis window — they must NOT appear in the visible
-      // message body.
-      const cleanText = stripPhaseMarkers(contentPart.text, setCurrentPhase);
+      // Nova OS fork: strip phase markers from the FULL accumulated text
+      // (not just the incoming delta) so a marker split across two SSE
+      // chunks — e.g. "<<<NOVA_PHASE:syn" + "thesizing>>>Hello!" —
+      // resolves once the second half arrives. Stripping per-delta only
+      // leaves the partial half stranded in the message body forever.
+      // Idempotent on already-clean accumulated text (cheap includes()).
       const currentContent = updatedContent[index] as MessageDeltaUpdate;
+      const fullText = (currentContent.text || '') + contentPart.text;
+      const cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
       const update: MessageDeltaUpdate = {
         type: ContentTypes.TEXT,
-        text: (currentContent.text || '') + cleanText,
+        text: cleanFull,
       };
 
       if ('tool_call_ids' in contentPart && contentPart.tool_call_ids != null) {

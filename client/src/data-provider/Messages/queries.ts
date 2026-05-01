@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryOptions, QueryObserverResult } from '@tanstack/react-query';
 import { QueryKeys, dataService } from 'librechat-data-provider';
 import type * as t from 'librechat-data-provider';
-import { logger } from '~/utils';
+import { logger, scrubPhaseMarkersFromMessages } from '~/utils';
 
 export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
   id: string,
@@ -15,6 +15,13 @@ export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
     [QueryKeys.messages, id],
     async () => {
       const result = await dataService.getMessagesByConvoId(id);
+      // Nova OS fork: server-side save doesn't strip <<<NOVA_PHASE:key>>>
+      // markers yet, so historical messages from MongoDB carry them. Scrub
+      // here so the rendered view stays clean. In-place mutation is fine
+      // because the result is freshly allocated by the data-service.
+      if (Array.isArray(result)) {
+        scrubPhaseMarkersFromMessages(result);
+      }
       if (!location.pathname.includes('/c/new') && result?.length === 1) {
         const currentMessages = queryClient.getQueryData<t.TMessage[]>([QueryKeys.messages, id]);
         if (currentMessages?.length === 1) {
