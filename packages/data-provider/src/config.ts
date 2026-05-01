@@ -689,6 +689,14 @@ export const interfaceSchema = z
       .optional(),
     termsOfService: termsOfServiceSchema.optional(),
     customWelcome: z.string().optional(),
+    /**
+     * Nova OS fork: text to display in place of the dot animation while a
+     * response is being generated but before the first content chunk
+     * arrives. Useful for backends with high time-to-first-token (agentic
+     * pipelines that plan + call tools before synthesizing). Empty / omitted
+     * = original behavior (dot only). Wired into EmptyText.tsx.
+     */
+    typingIndicatorText: z.string().optional(),
     mcpServers: mcpServersSchema.optional(),
     modelSelect: z.boolean().optional(),
     parameters: z.boolean().optional(),
