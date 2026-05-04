@@ -32,8 +32,6 @@ export function stripPhaseMarkers(
     lastPhase = m[1];
   }
   if (lastPhase != null) {
-    // eslint-disable-next-line no-console
-    console.log('[NOVA_PHASE] strip seen lastPhase=', lastPhase, 'fromTextLen=', text.length);
     reportPhase(lastPhase);
   }
   return text.replace(re, '');
