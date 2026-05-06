@@ -77,6 +77,21 @@ function resolveLabel(
 }
 
 /**
+ * Map a phase key to a target fill percentage for the determinate progress
+ * bar. Phases advance the bar through reasonable checkpoints — bar fills
+ * smoothly toward each target via CSS transition. Caps at 88% so an
+ * unexpected long synthesis phase still has visible "almost there"
+ * headroom; the bar disappears with EmptyText when first text streams in.
+ */
+function progressTargetForPhase(phase: string | null): number {
+  if (phase === null) return 8;
+  if (phase === 'planning') return 22;
+  if (phase === 'synthesizing') return 88;
+  if (phase.startsWith('tool:')) return 60;
+  return 35;
+}
+
+/**
  * Streaming cursor placeholder — shown while a response is being generated
  * but before the first content chunk arrives. No bottom margin to match
  * Container's structure and prevent CLS.
@@ -87,6 +102,10 @@ function resolveLabel(
  * - B2: interface.typingIndicatorPhases (key → string | locale-map) +
  *   <<<NOVA_PHASE:key>>> markers stripped upstream → live label that
  *   updates as the agent moves through planning → tool calls → synthesis.
+ * - Determinate fill bar: width grows toward a per-phase target via
+ *   `progressTargetForPhase`. Smooth via CSS width transition. Tracked
+ *   monotonically within a mount lifecycle — never rewinds if a phase
+ *   appears out of order.
  */
 const EmptyTextPart = memo(() => {
   const { data: startupConfig } = useGetStartupConfig();
@@ -128,6 +147,41 @@ const EmptyTextPart = memo(() => {
     return () => window.clearInterval(id);
   }, [currentPhase]);
 
+  // Determinate progress with continuous creep. Two-layer model:
+  //
+  //   1. ceilingRef — monotonic max of the per-phase target. Each phase
+  //      advance raises the ceiling. Never decreases (defends against
+  //      out-of-order server phases).
+  //
+  //   2. shownPct — the rendered fill, ticked toward ceilingRef every
+  //      ~200ms. Asymptotic with a floor: closes 6% of the remaining gap
+  //      per tick, but never less than 0.5% so the very last bit still
+  //      visibly creeps. This is what addresses the "bar looks frozen
+  //      while elapsed time keeps rising" problem — even within a single
+  //      phase that takes 13s, the bar keeps advancing toward the phase
+  //      ceiling, so the user sees continuous progress.
+  //
+  //   Phase change → ceiling jumps to new target → next tick advances
+  //   shownPct visibly toward the new ceiling, so transitions read as
+  //   acceleration rather than discrete jumps.
+  const phaseTarget = progressTargetForPhase(currentPhase);
+  const ceilingRef = useRef(phaseTarget);
+  if (phaseTarget > ceilingRef.current) {
+    ceilingRef.current = phaseTarget;
+  }
+  const [shownPct, setShownPct] = useState(progressTargetForPhase(null));
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setShownPct((prev) => {
+        const ceiling = ceilingRef.current;
+        if (ceiling - prev < 0.5) return prev;
+        const step = Math.max(0.5, (ceiling - prev) * 0.06);
+        return Math.min(ceiling, prev + step);
+      });
+    }, 200);
+    return () => window.clearInterval(id);
+  }, []);
+
   // Original LibreChat dot: rendered via `.submitting .result-thinking:empty:last-child:after`
   // which requires result-thinking to be the LAST CHILD of <p>. Adding a sibling span
   // (the label) breaks the :last-child match → dot stops rendering and the label can also
@@ -138,21 +192,42 @@ const EmptyTextPart = memo(() => {
   return (
     <div className="text-message flex min-h-[20px] flex-col items-start gap-3 overflow-visible">
       <div className="markdown prose dark:prose-invert light w-full break-words dark:text-gray-100">
-        <div className="flex items-center">
-          {/* Wrap the dot in a fixed-width box so its absolutely-positioned
-              `:after` pseudo-element (top: -11px, ~12px tall) doesn't
-              overlap the label that follows. */}
-          <p className="submitting relative inline-block w-[18px] flex-shrink-0">
-            <span className="result-thinking" />
-          </p>
-          {label && (
-            <span className="ml-2 text-sm text-text-secondary">
-              {label}
-              {elapsedSec >= 1 && (
-                <span className="ml-1 text-text-tertiary">({elapsedSec}s)</span>
-              )}
-            </span>
-          )}
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center">
+            {/* Wrap the dot in a fixed-width box so its absolutely-positioned
+                `:after` pseudo-element (top: -11px, ~12px tall) doesn't
+                overlap the label that follows. */}
+            <p className="submitting relative inline-block w-[18px] flex-shrink-0">
+              <span className="result-thinking" />
+            </p>
+            {label && (
+              <span className="ml-2 text-sm text-text-secondary">
+                {label}
+                {elapsedSec >= 1 && (
+                  <span className="ml-1 text-text-tertiary">({elapsedSec}s)</span>
+                )}
+              </span>
+            )}
+          </div>
+          {/* Determinate progress bar — width grows in jumps as the agent
+              moves through phases (planning → tool → synthesizing). For
+              non-technical users who skim past textual indicators, the
+              filling bar reads as "actively making progress" without
+              promising a specific percentage. Disappears when EmptyText
+              unmounts (first content chunk arrives). */}
+          <div
+            className="ml-[26px] h-[6px] w-48 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
+            role="progressbar"
+            aria-label={label ?? 'Working'}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={shownPct}
+          >
+            <div
+              className="h-full rounded-full bg-blue-500 transition-[width] duration-200 ease-linear"
+              style={{ width: `${shownPct}%` }}
+            />
+          </div>
         </div>
       </div>
     </div>

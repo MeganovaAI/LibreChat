@@ -29,7 +29,10 @@ import {
   scrollToEnd,
   getAllContentText,
   stripPhaseMarkers,
+  stripPlanMarkers,
+  stripStepMarkers,
   scrubPhaseMarkersFromMessage,
+  scrubPlanMarkersFromMessage,
   addConvoToAllQueries,
   updateConvoInAllQueries,
   removeConvoFromAllQueries,
@@ -187,6 +190,11 @@ export default function useEventHandlers({
   // from incoming text; cancel/error/final handlers reset to null so the
   // next message starts with the static fallback.
   const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
+  // Nova OS fork: setter for the right-side ProgressPanel sidebar.
+  // Populated on <<<NOVA_PLAN:base64-json>>>, transitioned on
+  // <<<NOVA_STEP:id:status>>>. Same dispatch pattern as setCurrentPhase
+  // — both message and step SSE paths feed it.
+  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -210,7 +218,29 @@ export default function useEventHandlers({
       // Nova OS fork: strip <<<NOVA_PHASE:key>>> markers from incoming text
       // and dispatch the latest phase to the atom EmptyText reads. Mirrors
       // the strip in useStepHandler.updateContent for the step-event path.
-      const text = stripPhaseMarkers(data ?? '', setCurrentPhase);
+      // Then strip <<<NOVA_PLAN:...>>> and <<<NOVA_STEP:...>>> for the
+      // ProgressPanel sidebar.
+      let text = stripPhaseMarkers(data ?? '', setCurrentPhase);
+      text = stripPlanMarkers(text, (steps) => {
+        setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
+      });
+      text = stripStepMarkers(text, (taskID, status) => {
+        setPlanSteps((prev) =>
+          prev.map((s) =>
+            s.id === taskID
+              ? {
+                  ...s,
+                  status:
+                    status === 'started'
+                      ? ('active' as const)
+                      : status === 'done'
+                        ? ('done' as const)
+                        : ('error' as const),
+                }
+              : s,
+          ),
+        );
+      });
       setIsSubmitting(true);
 
       const currentTime = Date.now();
@@ -238,7 +268,7 @@ export default function useEventHandlers({
         ]);
       }
     },
-    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase],
+    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase, setPlanSteps],
   );
 
   const cancelHandler = useCallback(
@@ -450,8 +480,12 @@ export default function useEventHandlers({
       // because LibreChat's server-side save path doesn't yet strip
       // markers — until that's patched, we defend at every read site.
       scrubPhaseMarkersFromMessage(data.responseMessage);
+      scrubPlanMarkersFromMessage(data.responseMessage);
       if (Array.isArray(data.runMessages)) {
-        data.runMessages.forEach((m) => scrubPhaseMarkersFromMessage(m as TMessage));
+        data.runMessages.forEach((m) => {
+          scrubPhaseMarkersFromMessage(m as TMessage);
+          scrubPlanMarkersFromMessage(m as TMessage);
+        });
       }
 
       const { requestMessage, responseMessage, conversation, runMessages } = data;

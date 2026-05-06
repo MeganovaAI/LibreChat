@@ -7,6 +7,7 @@ import { EditorProvider, ArtifactsProvider } from '~/Providers';
 import { useDeleteFilesMutation } from '~/data-provider';
 import Artifacts from '~/components/Artifacts/Artifacts';
 import { SidePanelGroup } from '~/components/SidePanel';
+import ProgressPanel from '~/components/SidePanel/Progress/ProgressPanel';
 import { useSetFilesToDelete } from '~/hooks';
 import store from '~/store';
 
@@ -67,6 +68,7 @@ export default function Presentation({ children }: { children: React.ReactNode }
           {children}
         </main>
       </SidePanelGroup>
+      <ProgressPanel />
     </DragDropWrapper>
   );
 }
