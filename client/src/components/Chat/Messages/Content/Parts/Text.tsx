@@ -23,13 +23,20 @@ type ContentType =
 // MongoDB-persisted history) can leak markers into message text. Scrub
 // here guarantees they never reach visible markdown regardless of how
 // they got into state. Cheap on already-clean text via includes() check.
-const NOVA_PHASE_RE = /<<<NOVA_PHASE:[^>]+>>>/g;
+const NOVA_MARKER_RE = /<<<NOVA_(?:PHASE|PLAN|STEP):[^>]+>>>/g;
 
 const TextPart = memo(function TextPart({ text: rawText, isCreatedByUser, showCursor }: TextPartProps) {
-  const text = useMemo(
-    () => (rawText && rawText.includes('<<<NOVA_PHASE:') ? rawText.replace(NOVA_PHASE_RE, '') : rawText),
-    [rawText],
-  );
+  const text = useMemo(() => {
+    if (!rawText) return rawText;
+    if (
+      !rawText.includes('<<<NOVA_PHASE:') &&
+      !rawText.includes('<<<NOVA_PLAN:') &&
+      !rawText.includes('<<<NOVA_STEP:')
+    ) {
+      return rawText;
+    }
+    return rawText.replace(NOVA_MARKER_RE, '');
+  }, [rawText]);
   const { isSubmitting = false, isLatestMessage = false } = useMessageContext();
   const enableUserMsgMarkdown = useRecoilValue(store.enableUserMsgMarkdown);
   const showCursorState = useMemo(() => showCursor && isSubmitting, [showCursor, isSubmitting]);

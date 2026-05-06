@@ -20,7 +20,7 @@ import { useSetRecoilState } from 'recoil';
 import type { SetterOrUpdater } from 'recoil';
 import type { AnnounceOptions } from '~/common';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
-import { stripPhaseMarkers } from '~/utils';
+import { stripPhaseMarkers, stripPlanMarkers, stripStepMarkers } from '~/utils';
 import store from '~/store';
 
 type TUseStepHandler = {
@@ -68,6 +68,9 @@ export default function useStepHandler({
   // dispatches the most recent key here. Mirrors the strip in
   // useEventHandlers.messageHandler for the message-event path.
   const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
+  // Nova OS fork: progress sidebar atom — same dispatch pattern as
+  // useEventHandlers.messageHandler for the message-event SSE path.
+  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
 
   const toolCallIdMap = useRef(new Map<string, string | undefined>());
   const messageMap = useRef(new Map<string, TMessage>());
@@ -152,7 +155,27 @@ export default function useStepHandler({
       const currentContent = updatedContent[index] as MessageDeltaUpdate;
       const priorText = currentContent.text || '';
       const fullText = priorText + contentPart.text;
-      const cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
+      let cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
+      cleanFull = stripPlanMarkers(cleanFull, (steps) => {
+        setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
+      });
+      cleanFull = stripStepMarkers(cleanFull, (taskID, status) => {
+        setPlanSteps((prev) =>
+          prev.map((s) =>
+            s.id === taskID
+              ? {
+                  ...s,
+                  status:
+                    status === 'started'
+                      ? ('active' as const)
+                      : status === 'done'
+                        ? ('done' as const)
+                        : ('error' as const),
+                }
+              : s,
+          ),
+        );
+      });
       // If the cleaned result is empty AND nothing real was here before,
       // do NOT materialize an empty text content-part. Part.tsx would
       // render <Text text=""/> for it, which unmounts <EmptyText/> and

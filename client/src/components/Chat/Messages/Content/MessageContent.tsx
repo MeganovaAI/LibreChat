@@ -24,10 +24,17 @@ const UNFINISHED_DELAY = 250;
 // still write marker text into message state. Stripping here guarantees
 // markers never reach the visible markdown regardless of how they got
 // into the message body. Cheap on already-clean text (single includes).
-const NOVA_PHASE_RE = /<<<NOVA_PHASE:[^>]+>>>/g;
+const NOVA_MARKER_RE = /<<<NOVA_(?:PHASE|PLAN|STEP):[^>]+>>>/g;
 const stripPhaseMarkersForRender = (text: string): string => {
-  if (!text || !text.includes('<<<NOVA_PHASE:')) return text;
-  return text.replace(NOVA_PHASE_RE, '');
+  if (
+    !text ||
+    (!text.includes('<<<NOVA_PHASE:') &&
+      !text.includes('<<<NOVA_PLAN:') &&
+      !text.includes('<<<NOVA_STEP:'))
+  ) {
+    return text;
+  }
+  return text.replace(NOVA_MARKER_RE, '');
 };
 
 const parseThinkingContent = (text: string) => {

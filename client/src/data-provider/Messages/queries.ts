@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UseQueryOptions, QueryObserverResult } from '@tanstack/react-query';
 import { QueryKeys, dataService } from 'librechat-data-provider';
 import type * as t from 'librechat-data-provider';
-import { logger, scrubPhaseMarkersFromMessages } from '~/utils';
+import { logger, scrubPhaseMarkersFromMessages, scrubPlanMarkersFromMessages } from '~/utils';
 
 export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
   id: string,
@@ -21,6 +21,7 @@ export const useGetMessagesByConvoId = <TData = t.TMessage[]>(
       // because the result is freshly allocated by the data-service.
       if (Array.isArray(result)) {
         scrubPhaseMarkersFromMessages(result);
+        scrubPlanMarkersFromMessages(result);
       }
       if (!location.pathname.includes('/c/new') && result?.length === 1) {
         const currentMessages = queryClient.getQueryData<t.TMessage[]>([QueryKeys.messages, id]);
