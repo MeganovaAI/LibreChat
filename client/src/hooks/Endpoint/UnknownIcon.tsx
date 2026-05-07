@@ -78,7 +78,13 @@ function UnknownIcon({
   }
 
   if (iconURL) {
-    return <img className={className} src={iconURL} alt={`${endpoint} Icon`} />;
+    return (
+      <img
+        className={cn(className, 'h-full w-full rounded-full object-cover')}
+        src={iconURL}
+        alt={`${endpoint} Icon`}
+      />
+    );
   }
 
   const assetPath: string = knownEndpointAssets[currentEndpoint] ?? '';

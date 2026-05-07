@@ -153,7 +153,7 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
               endpointsConfig={endpointsConfig}
               containerClassName={containerClassName}
               context="landing"
-              className="h-2/3 w-2/3 text-black dark:text-white"
+              className="h-full w-full text-black dark:text-white"
               size={41}
             />
             {startupConfig?.showBirthdayIcon && (
