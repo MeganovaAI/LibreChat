@@ -20,7 +20,12 @@ import { useSetRecoilState } from 'recoil';
 import type { SetterOrUpdater } from 'recoil';
 import type { AnnounceOptions } from '~/common';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
-import { stripPhaseMarkers, stripPlanMarkers, stripStepMarkers } from '~/utils';
+import {
+  stripPhaseMarkers,
+  stripPlanMarkers,
+  stripStepMarkers,
+  applyPlanStepTransition,
+} from '~/utils';
 import store from '~/store';
 
 type TUseStepHandler = {
@@ -160,21 +165,7 @@ export default function useStepHandler({
         setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
       });
       cleanFull = stripStepMarkers(cleanFull, (taskID, status) => {
-        setPlanSteps((prev) =>
-          prev.map((s) =>
-            s.id === taskID
-              ? {
-                  ...s,
-                  status:
-                    status === 'started'
-                      ? ('active' as const)
-                      : status === 'done'
-                        ? ('done' as const)
-                        : ('error' as const),
-                }
-              : s,
-          ),
-        );
+        setPlanSteps((prev) => applyPlanStepTransition(prev, taskID, status));
       });
       // If the cleaned result is empty AND nothing real was here before,
       // do NOT materialize an empty text content-part. Part.tsx would

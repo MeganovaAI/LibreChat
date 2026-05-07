@@ -1,4 +1,5 @@
 import type { TMessage } from 'librechat-data-provider';
+import type { PlanStep } from '~/store/progress';
 
 export type PlanStepWire = {
   id: string;
@@ -7,6 +8,34 @@ export type PlanStepWire = {
 };
 
 export type PlanStepStatus = 'started' | 'done' | 'error';
+
+/**
+ * Nova OS fork — pure reducer for a single `<<<NOVA_STEP:id:status>>>`
+ * transition. Maps the wire status (`started|done|error`) to the atom's
+ * status enum (`active|done|error`) and stamps client-side timing on the
+ * matching step. Centralized here so both SSE entry points
+ * (useEventHandlers.messageHandler and useStepHandler.updateContent) stay
+ * in lockstep — they used to copy-paste this transition logic.
+ */
+export function applyPlanStepTransition(
+  prev: PlanStep[],
+  taskID: string,
+  status: PlanStepStatus,
+): PlanStep[] {
+  const now = Date.now();
+  return prev.map((s) => {
+    if (s.id !== taskID) {
+      return s;
+    }
+    if (status === 'started') {
+      return { ...s, status: 'active', startedAt: s.startedAt ?? now };
+    }
+    if (status === 'done') {
+      return { ...s, status: 'done', startedAt: s.startedAt ?? now, completedAt: now };
+    }
+    return { ...s, status: 'error', startedAt: s.startedAt ?? now, completedAt: now };
+  });
+}
 
 const PLAN_RE = /<<<NOVA_PLAN:([A-Za-z0-9+/=]+)>>>/g;
 const STEP_RE = /<<<NOVA_STEP:([^:>]+):(started|done|error)>>>/g;

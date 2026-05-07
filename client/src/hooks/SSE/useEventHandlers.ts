@@ -31,6 +31,7 @@ import {
   stripPhaseMarkers,
   stripPlanMarkers,
   stripStepMarkers,
+  applyPlanStepTransition,
   scrubPhaseMarkersFromMessage,
   scrubPlanMarkersFromMessage,
   addConvoToAllQueries,
@@ -225,21 +226,7 @@ export default function useEventHandlers({
         setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
       });
       text = stripStepMarkers(text, (taskID, status) => {
-        setPlanSteps((prev) =>
-          prev.map((s) =>
-            s.id === taskID
-              ? {
-                  ...s,
-                  status:
-                    status === 'started'
-                      ? ('active' as const)
-                      : status === 'done'
-                        ? ('done' as const)
-                        : ('error' as const),
-                }
-              : s,
-          ),
-        );
+        setPlanSteps((prev) => applyPlanStepTransition(prev, taskID, status));
       });
       setIsSubmitting(true);
 
