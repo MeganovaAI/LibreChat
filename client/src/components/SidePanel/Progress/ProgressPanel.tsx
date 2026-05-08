@@ -4,11 +4,10 @@ import { useParams } from 'react-router-dom';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { Constants } from 'librechat-data-provider';
 import { Check, AlertCircle, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
 import type { PhaseEvent, PlanStep } from '~/store/progress';
 import type { PhaseRow, StepRow as StepRowType } from '~/utils';
 import { useGetStartupConfig } from '~/data-provider';
-import { mergePhasesAndSteps, phaseIcon, resolveLabel } from '~/utils';
+import { mergePhasesAndSteps, resolveLabel } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
 
@@ -49,13 +48,10 @@ const ProgressPanel = memo(function ProgressPanel() {
     [phaseEvents, planSteps, currentPhase],
   );
 
-  if (rows.length === 0) {
-    return null;
-  }
-
   const doneCount = planSteps.filter((s) => s.status === 'done').length;
   const activeCount = planSteps.filter((s) => s.status === 'active').length;
   const totalSteps = planSteps.length;
+  const hasContent = rows.length > 0;
 
   if (collapsed) {
     return (
@@ -85,9 +81,7 @@ const ProgressPanel = memo(function ProgressPanel() {
             <span className="text-[10px] text-text-tertiary">
               {doneCount}/{totalSteps}
             </span>
-          ) : (
-            <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden />
-          )}
+          ) : null}
         </button>
       </aside>
     );
@@ -105,6 +99,7 @@ const ProgressPanel = memo(function ProgressPanel() {
           </h2>
           <PanelSubtitle
             currentPhase={currentPhase}
+            hasContent={hasContent}
             doneCount={doneCount}
             totalCount={totalSteps}
             phases={phases}
@@ -161,6 +156,7 @@ function planStepIndex(rows: ReturnType<typeof mergePhasesAndSteps>, upTo: numbe
 
 function PanelSubtitle({
   currentPhase,
+  hasContent,
   doneCount,
   totalCount,
   phases,
@@ -169,6 +165,7 @@ function PanelSubtitle({
   localize,
 }: {
   currentPhase: string | null;
+  hasContent: boolean;
   doneCount: number;
   totalCount: number;
   phases: PhaseTable;
@@ -183,7 +180,15 @@ function PanelSubtitle({
           total: String(totalCount),
         })
       : null;
-  const phaseLabel = resolveLabel(currentPhase, phases, indicatorText, language);
+  // Streaming → resolve current phase label (falls back to indicatorText
+  // like "Thinking…"). Stream ended (currentPhase null) but panel has
+  // rows → "Done". Empty pre-submission → no subtitle at all.
+  let phaseLabel: string | undefined;
+  if (currentPhase != null) {
+    phaseLabel = resolveLabel(currentPhase, phases, indicatorText, language);
+  } else if (hasContent) {
+    phaseLabel = localize('com_ui_done');
+  }
   const parts = [counter, phaseLabel].filter((s): s is string => !!s);
   if (parts.length === 0) {
     return null;
@@ -204,15 +209,16 @@ function PhaseRowView({
   phases: PhaseTable;
   language: string;
 }) {
-  const Icon = phaseIcon(row.key);
   const label = resolveLabel(row.key, phases, undefined, language) ?? row.key;
   const isActive = row.status === 'active';
   return (
     <li className="flex items-start gap-3 py-2">
-      <PhaseBadge Icon={Icon} active={isActive} />
+      <PhaseBadge active={isActive} />
       <span
         className={`line-clamp-2 text-sm leading-tight ${
-          isActive ? 'text-text-primary' : 'text-text-tertiary'
+          isActive
+            ? 'text-text-primary'
+            : 'text-text-tertiary line-through'
         }`}
       >
         {label}
@@ -221,7 +227,7 @@ function PhaseRowView({
   );
 }
 
-function PhaseBadge({ Icon, active }: { Icon: LucideIcon; active: boolean }) {
+function PhaseBadge({ active }: { active: boolean }) {
   return (
     <span
       aria-hidden
@@ -231,7 +237,7 @@ function PhaseBadge({ Icon, active }: { Icon: LucideIcon; active: boolean }) {
           : 'bg-blue-500 text-white'
       }`}
     >
-      {active ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
+      {active ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} strokeWidth={3} />}
     </span>
   );
 }
@@ -317,12 +323,11 @@ function ChildPhaseRow({
   phases: PhaseTable;
   language: string;
 }) {
-  const Icon = phaseIcon(event.key);
   const label = resolveLabel(event.key, phases, undefined, language) ?? event.key;
   return (
     <li className="flex items-center gap-2 py-1 text-xs text-text-tertiary">
-      <Icon size={11} aria-hidden className="flex-shrink-0" />
-      <span className="line-clamp-1">{label}</span>
+      <Check size={11} strokeWidth={3} aria-hidden className="flex-shrink-0 text-blue-500" />
+      <span className="line-clamp-1 line-through">{label}</span>
     </li>
   );
 }

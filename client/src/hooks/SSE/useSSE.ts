@@ -52,6 +52,19 @@ export default function useSSE(
       },
     [],
   );
+  // Nova OS fork: seed an immediate "planning" placeholder so the panel
+  // has a visible spinner row in the 5-10s before the real first phase
+  // event arrives — clients no longer see an empty body and assume the
+  // app is broken. The real <<<NOVA_PHASE:planning>>> marker is deduped
+  // by the last-key-equals guard in messageHandler/updateContent.
+  const seedInitialPlanning = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string) => {
+        set(store.phaseEventsByConvoFamily(convoId), [{ key: 'planning', ts: Date.now() }]);
+        set(store.currentPhaseByConvoFamily(convoId), 'planning');
+      },
+    [],
+  );
 
   const {
     setMessages,
@@ -105,6 +118,7 @@ export default function useSSE(
     clearStepMaps();
     const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
     resetProgressForConvo(convoKey);
+    seedInitialPlanning(convoKey);
 
     const sse = new SSE(payloadData.server, {
       payload: JSON.stringify(payload),

@@ -110,6 +110,16 @@ export default function useResumableSSE(
       },
     [],
   );
+  // Nova OS fork: seed an immediate "planning" placeholder. Same as
+  // useSSE — see comment there for rationale.
+  const seedInitialPlanning = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string) => {
+        set(store.phaseEventsByConvoFamily(convoId), [{ key: 'planning', ts: Date.now() }]);
+        set(store.currentPhaseByConvoFamily(convoId), 'planning');
+      },
+    [],
+  );
 
   const {
     setMessages,
@@ -680,11 +690,13 @@ export default function useResumableSSE(
         // New generation: start and then subscribe
         console.log('[ResumableSSE] Starting NEW generation');
         // Nova OS fork: reset this chat's progress-panel atoms so the
-        // new turn begins with a clean timeline. Skip on resume — that
-        // path is reconnecting to an in-flight stream and the existing
-        // state is the live state.
+        // new turn begins with a clean timeline, then seed an immediate
+        // "planning" placeholder for instant feedback. Skip on resume —
+        // that path is reconnecting to an in-flight stream and the
+        // existing state is the live state.
         const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
         resetProgressForConvo(convoKey);
+        seedInitialPlanning(convoKey);
         const newStreamId = await startGeneration(submission);
         if (newStreamId) {
           setStreamId(newStreamId);
