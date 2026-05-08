@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 import { useRecoilState, useRecoilValue } from 'recoil';
+import { Constants } from 'librechat-data-provider';
 import { Check, AlertCircle, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PhaseEvent, PlanStep } from '~/store/progress';
@@ -31,9 +33,10 @@ type PhaseTable = Record<string, string | Record<string, string>> | undefined;
  *     count badge so activity stays glanceable.
  */
 const ProgressPanel = memo(function ProgressPanel() {
-  const planSteps = useRecoilValue(store.planStepsAtom);
-  const phaseEvents = useRecoilValue(store.phaseEventsAtom);
-  const currentPhase = useRecoilValue(store.currentPhaseAtom);
+  const { conversationId = Constants.NEW_CONVO } = useParams<{ conversationId?: string }>();
+  const planSteps = useRecoilValue(store.planStepsByConvoFamily(conversationId));
+  const phaseEvents = useRecoilValue(store.phaseEventsByConvoFamily(conversationId));
+  const currentPhase = useRecoilValue(store.currentPhaseByConvoFamily(conversationId));
   const [collapsed, setCollapsed] = useRecoilState(store.progressPanelCollapsedAtom);
   const localize = useLocalize();
   const { i18n } = useTranslation();

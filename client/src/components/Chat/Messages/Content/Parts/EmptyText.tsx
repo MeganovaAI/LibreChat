@@ -1,6 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useParams } from 'react-router-dom';
 import { useRecoilValue } from 'recoil';
+import { Constants } from 'librechat-data-provider';
 import type { PhaseTable } from '~/utils';
 import { useGetStartupConfig } from '~/data-provider';
 import { resolveLabel } from '~/utils';
@@ -43,7 +45,8 @@ function progressTargetForPhase(phase: string | null): number {
 const EmptyTextPart = memo(() => {
   const { data: startupConfig } = useGetStartupConfig();
   const { i18n } = useTranslation();
-  const currentPhase = useRecoilValue(store.currentPhaseAtom);
+  const { conversationId = Constants.NEW_CONVO } = useParams<{ conversationId?: string }>();
+  const currentPhase = useRecoilValue(store.currentPhaseByConvoFamily(conversationId));
 
   // Note: an earlier version reset currentPhase to null in useEffect on
   // mount to avoid a stale phase from the previous message flashing

@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 import { v4 } from 'uuid';
 import { SSE } from 'sse.js';
-import { useSetRecoilState } from 'recoil';
-import { request, createPayload, removeNullishValues } from 'librechat-data-provider';
+import { useRecoilCallback, useSetRecoilState } from 'recoil';
+import {
+  Constants,
+  request,
+  createPayload,
+  removeNullishValues,
+} from 'librechat-data-provider';
 import type { TMessage, TPayload, TSubmission, EventSubmission } from 'librechat-data-provider';
 import type { EventHandlerParams } from './useEventHandlers';
 import type { TResData } from '~/common';
@@ -34,14 +39,19 @@ export default function useSSE(
   const [completed, setCompleted] = useState(new Set());
   const setAbortScroll = useSetRecoilState(store.abortScrollFamily(runIndex));
   const setShowStopButton = useSetRecoilState(store.showStopButtonByIndex(runIndex));
-  // Nova OS fork: reset progress-panel atoms at submission start so a
-  // new turn begins with a clean activity timeline. The trap-door reset
-  // documented at progress.ts and EmptyText.tsx was never wired before;
-  // hooking it here (the one place a turn unambiguously starts) prevents
-  // phaseEvents/planSteps/currentPhase from leaking across messages.
-  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
-  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
-  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
+  // Nova OS fork: clear THIS chat's progress-panel atoms at submission
+  // start so a new turn begins with a clean activity timeline. Scoped
+  // to the active conversationId via atomFamily — switching chats
+  // doesn't disturb the other chat's stored content.
+  const resetProgressForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string) => {
+        set(store.currentPhaseByConvoFamily(convoId), null);
+        set(store.planStepsByConvoFamily(convoId), []);
+        set(store.phaseEventsByConvoFamily(convoId), []);
+      },
+    [],
+  );
 
   const {
     setMessages,
@@ -93,9 +103,8 @@ export default function useSSE(
 
     let textIndex = null;
     clearStepMaps();
-    setCurrentPhase(null);
-    setPlanSteps([]);
-    setPhaseEvents([]);
+    const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
+    resetProgressForConvo(convoKey);
 
     const sse = new SSE(payloadData.server, {
       payload: JSON.stringify(payload),

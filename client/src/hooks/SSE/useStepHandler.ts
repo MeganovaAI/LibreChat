@@ -16,9 +16,10 @@ import type {
   SummaryContentPart,
   TMessageContentParts,
 } from 'librechat-data-provider';
-import { useSetRecoilState } from 'recoil';
+import { useRecoilCallback } from 'recoil';
 import type { SetterOrUpdater } from 'recoil';
 import type { AnnounceOptions } from '~/common';
+import type { PhaseEvent, PlanStep } from '~/store/progress';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 import {
   stripPhaseMarkers,
@@ -68,20 +69,31 @@ export default function useStepHandler({
   announcePolite,
   lastAnnouncementTimeRef,
 }: TUseStepHandler) {
-  // Nova OS fork: setter for the phase indicator. updateContent strips
-  // <<<NOVA_PHASE:key>>> markers from contentPart.text on each
-  // ON_MESSAGE_DELTA before they get appended to the message body, and
-  // dispatches the most recent key here. Mirrors the strip in
-  // useEventHandlers.messageHandler for the message-event path.
-  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
-  // Nova OS fork: progress sidebar atom — same dispatch pattern as
-  // useEventHandlers.messageHandler for the message-event SSE path.
-  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
-  // Nova OS fork: phase-events timeline. updateContent operates on the
-  // already-stripped accumulated text + raw delta, so re-stripping the
-  // concat won't see prior markers a second time — append per match is
-  // safe here without slice tracking.
-  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
+  // Nova OS fork: dynamic-key writers for the per-conversation atoms
+  // — see useEventHandlers.ts for the rationale. updateContent reads the
+  // submission's stable convoKey from the stepHandler closure to route
+  // each write to the right family member.
+  const setCurrentPhaseForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: string | null) => {
+        set(store.currentPhaseByConvoFamily(convoId), value);
+      },
+    [],
+  );
+  const setPlanStepsForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: PlanStep[] | ((prev: PlanStep[]) => PlanStep[])) => {
+        set(store.planStepsByConvoFamily(convoId), value);
+      },
+    [],
+  );
+  const setPhaseEventsForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: PhaseEvent[] | ((prev: PhaseEvent[]) => PhaseEvent[])) => {
+        set(store.phaseEventsByConvoFamily(convoId), value);
+      },
+    [],
+  );
 
   const toolCallIdMap = useRef(new Map<string, string | undefined>());
   const messageMap = useRef(new Map<string, TMessage>());
@@ -120,7 +132,8 @@ export default function useStepHandler({
 
   /** Metadata to propagate onto content parts for parallel rendering - uses ContentMetadata from data-provider */
 
-  const updateContent = (
+  const updateContentForConvo = (
+    convoKey: string,
     message: TMessage,
     index: number,
     contentPart: Agents.MessageContentComplex,
@@ -166,19 +179,24 @@ export default function useStepHandler({
       const currentContent = updatedContent[index] as MessageDeltaUpdate;
       const priorText = currentContent.text || '';
       const fullText = priorText + contentPart.text;
-      let cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
+      let cleanFull = stripPhaseMarkers(fullText, (key) =>
+        setCurrentPhaseForConvo(convoKey, key),
+      );
       stripPhaseMarkersAll(contentPart.text, (key) => {
-        setPhaseEvents((prev) =>
+        setPhaseEventsForConvo(convoKey, (prev) =>
           prev.length > 0 && prev[prev.length - 1].key === key
             ? prev
             : [...prev, { key, ts: Date.now() }],
         );
       });
       cleanFull = stripPlanMarkers(cleanFull, (steps) => {
-        setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
+        setPlanStepsForConvo(
+          convoKey,
+          steps.map((s) => ({ ...s, status: 'pending' as const })),
+        );
       });
       cleanFull = stripStepMarkers(cleanFull, (taskID, status) => {
-        setPlanSteps((prev) => applyPlanStepTransition(prev, taskID, status));
+        setPlanStepsForConvo(convoKey, (prev) => applyPlanStepTransition(prev, taskID, status));
       });
       // If the cleaned result is empty AND nothing real was here before,
       // do NOT materialize an empty text content-part. Part.tsx would
@@ -310,6 +328,18 @@ export default function useStepHandler({
       const messages = getMessages() || [];
       const { userMessage } = submission;
       let parentMessageId = userMessage.messageId;
+      // Nova OS fork: stable per-stream convoKey threaded into every
+      // updateContent call so phase/plan/step writes land in the right
+      // family member. NEW_CONVO during new chats; the migration to a
+      // real UUID happens in useEventHandlers.finalHandler.
+      const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
+      const updateContent = (
+        message: TMessage,
+        index: number,
+        contentPart: Agents.MessageContentComplex,
+        finalUpdate = false,
+        metadata?: ContentMetadata,
+      ) => updateContentForConvo(convoKey, message, index, contentPart, finalUpdate, metadata);
 
       const currentTime = Date.now();
       if (currentTime - lastAnnouncementTimeRef.current > MESSAGE_UPDATE_INTERVAL) {

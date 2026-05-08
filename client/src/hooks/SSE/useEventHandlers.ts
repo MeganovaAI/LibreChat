@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { v4 } from 'uuid';
-import { useSetRecoilState } from 'recoil';
+import { useRecoilCallback, useSetRecoilState } from 'recoil';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -23,6 +23,7 @@ import type { TResData, TFinalResData, ConvoGenerator } from '~/common';
 import type { InfiniteData } from '@tanstack/react-query';
 import type { SetterOrUpdater, Resetter } from 'recoil';
 import type { ConversationCursorData } from '~/utils';
+import type { PhaseEvent, PlanStep } from '~/store/progress';
 import {
   logger,
   setDraft,
@@ -187,22 +188,59 @@ export default function useEventHandlers({
   const { announcePolite } = useLiveAnnouncer();
   const applyAgentTemplate = useApplyAgentTemplate();
   const setAbortScroll = useSetRecoilState(store.abortScroll);
-  // Nova OS fork: setter for the phase indicator that EmptyText subscribes
-  // to. messageHandler dispatches as it strips <<<NOVA_PHASE:key>>> markers
-  // from incoming text; cancel/error/final handlers reset to null so the
-  // next message starts with the static fallback.
-  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
-  // Nova OS fork: setter for the right-side ProgressPanel sidebar.
-  // Populated on <<<NOVA_PLAN:base64-json>>>, transitioned on
-  // <<<NOVA_STEP:id:status>>>. Same dispatch pattern as setCurrentPhase
-  // — both message and step SSE paths feed it.
-  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
-  // Nova OS fork: append-only timeline of phase events for the current
-  // turn. messageHandler operates on the full running message-so-far on
-  // each SSE chunk, so we slice by lastSeenLength (per messageId) before
-  // re-stripping — that way each marker fires reportPhase exactly once
-  // even though the buffer keeps growing.
-  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
+  // Nova OS fork: dynamic-key setters for the per-conversation progress
+  // atoms. useRecoilCallback lets us write to family[<convoId>] decided
+  // at call time — submission.conversation.conversationId is the stable
+  // key for the duration of a stream (NEW_CONVO during a new chat,
+  // migrated to the real UUID inside finalHandler before navigate).
+  const setCurrentPhaseForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: string | null) => {
+        set(store.currentPhaseByConvoFamily(convoId), value);
+      },
+    [],
+  );
+  const setPlanStepsForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: PlanStep[] | ((prev: PlanStep[]) => PlanStep[])) => {
+        set(store.planStepsByConvoFamily(convoId), value);
+      },
+    [],
+  );
+  const setPhaseEventsForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string, value: PhaseEvent[] | ((prev: PhaseEvent[]) => PhaseEvent[])) => {
+        set(store.phaseEventsByConvoFamily(convoId), value);
+      },
+    [],
+  );
+  // Migrate a new chat's atoms from family[NEW_CONVO] to family[realId]
+  // and reset NEW_CONVO entries to defaults. Fires once at finalHandler
+  // for new-chat completions, just before the navigate to /c/<realId>.
+  const migrateConvoState = useRecoilCallback(
+    ({ snapshot, set }) =>
+      (fromKey: string, toKey: string) => {
+        if (fromKey === toKey) {
+          return;
+        }
+        const phaseEvents = snapshot
+          .getLoadable(store.phaseEventsByConvoFamily(fromKey))
+          .getValue();
+        const planSteps = snapshot
+          .getLoadable(store.planStepsByConvoFamily(fromKey))
+          .getValue();
+        const currentPhase = snapshot
+          .getLoadable(store.currentPhaseByConvoFamily(fromKey))
+          .getValue();
+        set(store.phaseEventsByConvoFamily(toKey), phaseEvents);
+        set(store.planStepsByConvoFamily(toKey), planSteps);
+        set(store.currentPhaseByConvoFamily(toKey), currentPhase);
+        set(store.phaseEventsByConvoFamily(fromKey), []);
+        set(store.planStepsByConvoFamily(fromKey), []);
+        set(store.currentPhaseByConvoFamily(fromKey), null);
+      },
+    [],
+  );
   const lastDataLengthRef = useRef(new Map<string, number>());
   const navigate = useNavigate();
   const location = useLocation();
@@ -224,18 +262,21 @@ export default function useEventHandlers({
   const messageHandler = useCallback(
     (data: string | undefined, submission: EventSubmission) => {
       const { messages, userMessage, initialResponse, isRegenerate = false } = submission;
-      // Nova OS fork: strip <<<NOVA_PHASE:key>>> markers from incoming text
-      // and dispatch the latest phase to the atom EmptyText reads. Mirrors
-      // the strip in useStepHandler.updateContent for the step-event path.
-      // Then strip <<<NOVA_PLAN:...>>> and <<<NOVA_STEP:...>>> for the
-      // ProgressPanel sidebar.
+      // Nova OS fork: derive a stable convoKey from the submission and
+      // route every per-conversation atom write through it. Stable for
+      // the duration of the stream — for new chats it's NEW_CONVO and
+      // is migrated to the real UUID by finalHandler before navigate.
+      const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
+      // Strip <<<NOVA_PHASE:key>>> markers and dispatch the latest phase
+      // to the per-chat atom EmptyText reads. Then strip
+      // <<<NOVA_PLAN:...>>> and <<<NOVA_STEP:...>>> for the sidebar.
       const fullData = data ?? '';
-      let text = stripPhaseMarkers(fullData, setCurrentPhase);
+      let text = stripPhaseMarkers(fullData, (key) => setCurrentPhaseForConvo(convoKey, key));
       const messageId = initialResponse.messageId;
       const seen = lastDataLengthRef.current.get(messageId) ?? 0;
       const slice = seen > fullData.length ? fullData : fullData.slice(seen);
       stripPhaseMarkersAll(slice, (key) => {
-        setPhaseEvents((prev) =>
+        setPhaseEventsForConvo(convoKey, (prev) =>
           prev.length > 0 && prev[prev.length - 1].key === key
             ? prev
             : [...prev, { key, ts: Date.now() }],
@@ -243,10 +284,13 @@ export default function useEventHandlers({
       });
       lastDataLengthRef.current.set(messageId, fullData.length);
       text = stripPlanMarkers(text, (steps) => {
-        setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
+        setPlanStepsForConvo(
+          convoKey,
+          steps.map((s) => ({ ...s, status: 'pending' as const })),
+        );
       });
       text = stripStepMarkers(text, (taskID, status) => {
-        setPlanSteps((prev) => applyPlanStepTransition(prev, taskID, status));
+        setPlanStepsForConvo(convoKey, (prev) => applyPlanStepTransition(prev, taskID, status));
       });
       setIsSubmitting(true);
 
@@ -275,7 +319,14 @@ export default function useEventHandlers({
         ]);
       }
     },
-    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase, setPlanSteps, setPhaseEvents],
+    [
+      setMessages,
+      announcePolite,
+      setIsSubmitting,
+      setCurrentPhaseForConvo,
+      setPlanStepsForConvo,
+      setPhaseEventsForConvo,
+    ],
   );
 
   const cancelHandler = useCallback(
@@ -284,6 +335,7 @@ export default function useEventHandlers({
       const { messages, isRegenerate = false } = submission;
       const convoUpdate =
         (conversation as TConversation | null) ?? (submission.conversation as TConversation);
+      const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
 
       // update the messages
       if (isRegenerate) {
@@ -311,9 +363,16 @@ export default function useEventHandlers({
       }
 
       setIsSubmitting(false);
-      setCurrentPhase(null);
+      setCurrentPhaseForConvo(convoKey, null);
     },
-    [setMessages, setConversation, isAddedRequest, queryClient, setIsSubmitting, setCurrentPhase],
+    [
+      setMessages,
+      setConversation,
+      isAddedRequest,
+      queryClient,
+      setIsSubmitting,
+      setCurrentPhaseForConvo,
+    ],
   );
 
   const syncHandler = useCallback(
@@ -503,6 +562,7 @@ export default function useEventHandlers({
         isRegenerate = false,
         isTemporary: _isTemporary = false,
       } = submission;
+      const convoKey = submissionConvo?.conversationId ?? Constants.NEW_CONVO;
 
       try {
         // Handle early abort - aborted during tool loading before any messages saved
@@ -659,13 +719,25 @@ export default function useEventHandlers({
           }
 
           if (location.pathname === `/c/${Constants.NEW_CONVO}`) {
+            // Nova OS fork: writers targeted family[NEW_CONVO] for the
+            // entire stream. Migrate to family[realId] BEFORE the URL
+            // flips so ProgressPanel's next read (keyed by useParams)
+            // sees the populated entry instead of an empty one.
+            if (conversation.conversationId && convoKey === Constants.NEW_CONVO) {
+              migrateConvoState(Constants.NEW_CONVO, conversation.conversationId);
+            }
             navigate(`/c/${conversation.conversationId}`, { replace: true });
           }
         }
       } finally {
         setShowStopButton(false);
         setIsSubmitting(false);
-        setCurrentPhase(null);
+        // Null the latest phase on the key writers used during the
+        // stream. If migration ran above, the migration already cleared
+        // NEW_CONVO; the realId entry is what matters now and its
+        // `currentPhase` is set to null here.
+        const finalKey = conversation?.conversationId ?? convoKey;
+        setCurrentPhaseForConvo(finalKey, null);
       }
     },
     [
@@ -679,7 +751,8 @@ export default function useEventHandlers({
       setConversation,
       setIsSubmitting,
       setShowStopButton,
-      setCurrentPhase,
+      setCurrentPhaseForConvo,
+      migrateConvoState,
       location.pathname,
       applyAgentTemplate,
       attachmentHandler,
@@ -690,7 +763,8 @@ export default function useEventHandlers({
     ({ data, submission }: { data?: TResData; submission: EventSubmission }) => {
       const { messages, userMessage, initialResponse } = submission;
       setCompleted((prev) => new Set(prev.add(initialResponse.messageId)));
-      setCurrentPhase(null);
+      const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
+      setCurrentPhaseForConvo(convoKey, null);
 
       const conversationId =
         userMessage.conversationId ?? submission.conversation?.conversationId ?? '';
@@ -783,7 +857,7 @@ export default function useEventHandlers({
       paramId,
       newConversation,
       setIsSubmitting,
-      setCurrentPhase,
+      setCurrentPhaseForConvo,
       getMessages,
       queryClient,
     ],

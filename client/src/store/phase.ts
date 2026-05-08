@@ -1,22 +1,22 @@
-import { atom } from 'recoil';
+import { atomFamily } from 'recoil';
 
 /**
- * Nova OS fork — currentPhaseAtom holds the most recent phase key emitted
- * by the upstream agent (planning / tool:web_search / synthesizing / …).
+ * Nova OS fork — most recent phase key emitted by the upstream agent,
+ * keyed by conversationId. Set by the marker-stripper in
+ * useEventHandlers.messageHandler and useStepHandler.updateContent
+ * whenever a <<<NOVA_PHASE:key>>> marker is seen in the streaming
+ * content. Read by EmptyText to render a localized indicator and by
+ * ProgressPanel to drive the "still streaming" flag for its merge
+ * function. Reset to null on cancel/error/final so the next message
+ * starts with the static fallback.
  *
- * Set by the marker-stripper in useEventHandlers.messageHandler whenever a
- * <<<NOVA_PHASE:key>>> marker is seen in the streaming content. Read by
- * EmptyText.tsx to render a localized indicator. Reset to null when a
- * conversation completes / cancels / errors so the next message starts
- * with the static fallback.
- *
- * Single global atom (not per-message) — only one streaming response can
- * be in-flight per user at a time.
+ * Per-conversation so switching chats shows that chat's last phase.
+ * Reset at submission start in useSSE.
  */
-const currentPhaseAtom = atom<string | null>({
-  key: 'currentPhase',
+const currentPhaseByConvoFamily = atomFamily<string | null, string>({
+  key: 'currentPhaseByConvo',
   default: null,
 });
 
-const phase = { currentPhaseAtom };
+const phase = { currentPhaseByConvoFamily };
 export default phase;

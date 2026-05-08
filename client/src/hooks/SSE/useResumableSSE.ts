@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { v4 } from 'uuid';
 import { SSE } from 'sse.js';
-import { useSetRecoilState } from 'recoil';
+import { useRecoilCallback, useSetRecoilState } from 'recoil';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   request,
@@ -95,6 +95,21 @@ export default function useResumableSSE(
   const reconnectAttemptRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const submissionRef = useRef<TSubmission | null>(null);
+  // Nova OS fork: clear THIS chat's progress-panel atoms at submission
+  // start so a new turn begins with a clean activity timeline. Same
+  // pattern as useSSE — needed here too because the resumable path is
+  // the actual transport when generation_resume_enabled is on, and
+  // skipping it leaves the previous turn's plan steps visible until
+  // overwritten.
+  const resetProgressForConvo = useRecoilCallback(
+    ({ set }) =>
+      (convoId: string) => {
+        set(store.currentPhaseByConvoFamily(convoId), null);
+        set(store.planStepsByConvoFamily(convoId), []);
+        set(store.phaseEventsByConvoFamily(convoId), []);
+      },
+    [],
+  );
 
   const {
     setMessages,
@@ -664,6 +679,12 @@ export default function useResumableSSE(
       } else {
         // New generation: start and then subscribe
         console.log('[ResumableSSE] Starting NEW generation');
+        // Nova OS fork: reset this chat's progress-panel atoms so the
+        // new turn begins with a clean timeline. Skip on resume — that
+        // path is reconnecting to an in-flight stream and the existing
+        // state is the live state.
+        const convoKey = submission.conversation?.conversationId ?? Constants.NEW_CONVO;
+        resetProgressForConvo(convoKey);
         const newStreamId = await startGeneration(submission);
         if (newStreamId) {
           setStreamId(newStreamId);
