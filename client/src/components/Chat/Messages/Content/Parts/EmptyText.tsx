@@ -1,80 +1,13 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRecoilValue } from 'recoil';
+import type { PhaseTable } from '~/utils';
 import { useGetStartupConfig } from '~/data-provider';
+import { resolveLabel } from '~/utils';
 import store from '~/store';
 
 type LocaleMap = Record<string, string>;
 type IndicatorTextConfig = string | LocaleMap | undefined;
-type PhaseTable = Record<string, string | LocaleMap> | undefined;
-
-/**
- * Pick a localized string from a (string | locale-map) config value.
- *
- * - String: returned as-is for every locale.
- * - Object map (locale → text): exact-match first, then language-prefix
- *   fallback (`zh-CN` → `zh`), then `default`, then `en`, then the first
- *   key. Returns undefined only when the map is empty.
- */
-function pickLocalized(
-  raw: string | LocaleMap | undefined,
-  language: string,
-): string | undefined {
-  if (typeof raw === 'string') {
-    return raw.length > 0 ? raw : undefined;
-  }
-  if (!raw || typeof raw !== 'object') {
-    return undefined;
-  }
-  if (raw[language]) {
-    return raw[language];
-  }
-  const prefix = language.split('-')[0];
-  if (prefix && raw[prefix]) {
-    return raw[prefix];
-  }
-  if (raw.default) {
-    return raw.default;
-  }
-  if (raw.en) {
-    return raw.en;
-  }
-  const firstKey = Object.keys(raw)[0];
-  return firstKey ? raw[firstKey] : undefined;
-}
-
-/**
- * Resolve the phase label to render right now.
- * Resolution order:
- *   1. If currentPhase is set AND maps to a configured entry in
- *      typingIndicatorPhases (exact key OR `tool:*` wildcard) → that label.
- *   2. If currentPhase is set with `tool:<name>` shape but no specific
- *      entry → auto-fallback to "Running <name>…" (auto-localized via
- *      the `default` / `en` keys of typingIndicatorPhases.tool when set).
- *   3. Otherwise → typingIndicatorText (the static fallback shown before
- *      any phase event arrives).
- */
-function resolveLabel(
-  currentPhase: string | null,
-  phases: PhaseTable,
-  text: IndicatorTextConfig,
-  language: string,
-): string | undefined {
-  if (currentPhase && phases) {
-    if (phases[currentPhase]) {
-      return pickLocalized(phases[currentPhase], language);
-    }
-    if (currentPhase.startsWith('tool:')) {
-      const toolName = currentPhase.slice('tool:'.length);
-      const fallback = phases['tool:*'] ?? phases.tool;
-      if (fallback) {
-        const template = pickLocalized(fallback, language);
-        return template ? template.replace('{tool}', toolName) : undefined;
-      }
-    }
-  }
-  return pickLocalized(text, language);
-}
 
 /**
  * Map a phase key to a target fill percentage for the determinate progress

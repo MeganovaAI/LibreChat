@@ -22,6 +22,7 @@ import type { AnnounceOptions } from '~/common';
 import { MESSAGE_UPDATE_INTERVAL } from '~/common';
 import {
   stripPhaseMarkers,
+  stripPhaseMarkersAll,
   stripPlanMarkers,
   stripStepMarkers,
   applyPlanStepTransition,
@@ -76,6 +77,11 @@ export default function useStepHandler({
   // Nova OS fork: progress sidebar atom — same dispatch pattern as
   // useEventHandlers.messageHandler for the message-event SSE path.
   const setPlanSteps = useSetRecoilState(store.planStepsAtom);
+  // Nova OS fork: phase-events timeline. updateContent operates on the
+  // already-stripped accumulated text + raw delta, so re-stripping the
+  // concat won't see prior markers a second time — append per match is
+  // safe here without slice tracking.
+  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
 
   const toolCallIdMap = useRef(new Map<string, string | undefined>());
   const messageMap = useRef(new Map<string, TMessage>());
@@ -161,6 +167,13 @@ export default function useStepHandler({
       const priorText = currentContent.text || '';
       const fullText = priorText + contentPart.text;
       let cleanFull = stripPhaseMarkers(fullText, setCurrentPhase);
+      stripPhaseMarkersAll(contentPart.text, (key) => {
+        setPhaseEvents((prev) =>
+          prev.length > 0 && prev[prev.length - 1].key === key
+            ? prev
+            : [...prev, { key, ts: Date.now() }],
+        );
+      });
       cleanFull = stripPlanMarkers(cleanFull, (steps) => {
         setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
       });

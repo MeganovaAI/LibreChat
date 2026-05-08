@@ -13,6 +13,19 @@ export type PlanStep = {
 };
 
 /**
+ * Nova OS fork — one entry per `<<<NOVA_PHASE:key>>>` marker observed in
+ * the streamed text, with the client-side timestamp of arrival. Used to
+ * render an activity timeline in ProgressPanel alongside plan-step rows
+ * (e.g. `planning` → `tool:knowledge_search` → `tool:web_search` →
+ * `synthesizing`). Distinct from `currentPhaseAtom` which keeps only the
+ * latest key for the typing-indicator subtitle.
+ */
+export type PhaseEvent = {
+  key: string;
+  ts: number;
+};
+
+/**
  * Nova OS fork — planStepsAtom holds the upstream agent's planned task
  * list along with each step's current lifecycle status and per-step
  * timing. Populated by the marker-stripper when a `<<<NOVA_PLAN:base64-json>>>`
@@ -35,6 +48,17 @@ const planStepsAtom = atom<PlanStep[]>({
 });
 
 /**
+ * Nova OS fork — append-only list of phase events for the current turn,
+ * populated by the marker-stripper in useEventHandlers / useStepHandler.
+ * Reset alongside `planStepsAtom` and `currentPhaseAtom` at submission
+ * start in `useSSE` so a new turn always begins with a clean timeline.
+ */
+const phaseEventsAtom = atom<PhaseEvent[]>({
+  key: 'phaseEvents',
+  default: [],
+});
+
+/**
  * Nova OS fork — user-controlled collapsed/expanded preference for the
  * right-side ProgressPanel. Persisted across sessions because it is a
  * deliberate UX choice (not transient state); a user who wants the rail
@@ -48,5 +72,5 @@ const progressPanelCollapsedAtom = atomWithLocalStorage<boolean>(
   false,
 );
 
-const progress = { planStepsAtom, progressPanelCollapsedAtom };
+const progress = { planStepsAtom, phaseEventsAtom, progressPanelCollapsedAtom };
 export default progress;

@@ -1,44 +1,58 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { Check, AlertCircle, Loader2, ChevronRight, ChevronLeft } from 'lucide-react';
-import type { PlanStep } from '~/store/progress';
+import type { LucideIcon } from 'lucide-react';
+import type { PhaseEvent, PlanStep } from '~/store/progress';
+import type { PhaseRow, StepRow as StepRowType } from '~/utils';
+import { useGetStartupConfig } from '~/data-provider';
+import { mergePhasesAndSteps, phaseIcon, resolveLabel } from '~/utils';
 import { useLocalize } from '~/hooks';
 import store from '~/store';
 
+type IndicatorTextConfig = string | Record<string, string> | undefined;
+type PhaseTable = Record<string, string | Record<string, string>> | undefined;
+
 /**
  * Nova OS fork — right-side "Progress" sidebar showing the agent's
- * planned steps with current lifecycle status. Surfaces what the AI is
- * doing during long pre-token waits so non-tech-savvy users (teachers,
- * parents on KCH-class deployments) understand the activity beyond a
- * dot + elapsed-time counter.
+ * activity as a single unified timeline. Phase events from the wire
+ * (`<<<NOVA_PHASE:...>>>` markers — `planning`, `tool:<capability>`,
+ * `tool:<function>`, `synthesizing`) are merged with planner-derived
+ * BrainTask rows so a 1-task query still produces ~4 visible rows.
  *
- * Driven by `planStepsAtom`, populated by the SSE marker stripper in
- * useEventHandlers / useStepHandler from `<<<NOVA_PLAN:...>>>` and
- * `<<<NOVA_STEP:id:status>>>` markers. Hidden when the atom is empty
- * — no plan, no panel.
+ * Driven by `planStepsAtom` + `phaseEventsAtom`, populated by the SSE
+ * marker stripper in useEventHandlers / useStepHandler. Hidden when both
+ * are empty — no plan, no panel.
  *
  * Two display modes:
  *   - Expanded: 320px panel with header (current phase + completed count),
- *     ordered step list, elapsed time on the active step.
- *   - Collapsed: 32px rail with a vertical "Progress" label and a small
- *     active-count badge so the user still sees activity at a glance.
- *
- * Fixed-position drawer (right edge) so it doesn't fight LibreChat's
- * existing ResizablePanelGroup layout used by ArtifactsPanel. User's
- * collapsed/expanded preference persists across sessions.
+ *     unified timeline, elapsed time on the active step.
+ *   - Collapsed: 32px rail with a vertical "Progress" label + active-step
+ *     count badge so activity stays glanceable.
  */
 const ProgressPanel = memo(function ProgressPanel() {
   const planSteps = useRecoilValue(store.planStepsAtom);
+  const phaseEvents = useRecoilValue(store.phaseEventsAtom);
   const currentPhase = useRecoilValue(store.currentPhaseAtom);
   const [collapsed, setCollapsed] = useRecoilState(store.progressPanelCollapsedAtom);
   const localize = useLocalize();
+  const { i18n } = useTranslation();
+  const { data: startupConfig } = useGetStartupConfig();
+  const indicatorText = startupConfig?.interface?.typingIndicatorText as IndicatorTextConfig;
+  const phases = startupConfig?.interface?.typingIndicatorPhases as PhaseTable;
 
-  if (planSteps.length === 0) {
+  const rows = useMemo(
+    () => mergePhasesAndSteps(phaseEvents, planSteps, currentPhase != null),
+    [phaseEvents, planSteps, currentPhase],
+  );
+
+  if (rows.length === 0) {
     return null;
   }
 
   const doneCount = planSteps.filter((s) => s.status === 'done').length;
   const activeCount = planSteps.filter((s) => s.status === 'active').length;
+  const totalSteps = planSteps.length;
 
   if (collapsed) {
     return (
@@ -64,10 +78,12 @@ const ProgressPanel = memo(function ProgressPanel() {
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-semibold text-white">
               {activeCount}
             </span>
-          ) : (
+          ) : totalSteps > 0 ? (
             <span className="text-[10px] text-text-tertiary">
-              {doneCount}/{planSteps.length}
+              {doneCount}/{totalSteps}
             </span>
+          ) : (
+            <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden />
           )}
         </button>
       </aside>
@@ -87,7 +103,10 @@ const ProgressPanel = memo(function ProgressPanel() {
           <PanelSubtitle
             currentPhase={currentPhase}
             doneCount={doneCount}
-            totalCount={planSteps.length}
+            totalCount={totalSteps}
+            phases={phases}
+            indicatorText={indicatorText}
+            language={i18n.language}
             localize={localize}
           />
         </div>
@@ -102,9 +121,24 @@ const ProgressPanel = memo(function ProgressPanel() {
         </button>
       </header>
       <ol className="max-h-[calc(100vh-12rem)] overflow-y-auto px-4 py-3">
-        {planSteps.map((step, index) => (
-          <StepRow key={step.id} step={step} index={index + 1} />
-        ))}
+        {rows.map((row, index) =>
+          row.kind === 'phase' ? (
+            <PhaseRowView
+              key={`phase-${row.key}-${row.ts}`}
+              row={row}
+              phases={phases}
+              language={i18n.language}
+            />
+          ) : (
+            <StepRowView
+              key={`step-${row.step.id}`}
+              row={row}
+              index={planStepIndex(rows, index)}
+              phases={phases}
+              language={i18n.language}
+            />
+          ),
+        )}
       </ol>
     </aside>
   );
@@ -112,74 +146,180 @@ const ProgressPanel = memo(function ProgressPanel() {
 
 ProgressPanel.displayName = 'ProgressPanel';
 
+function planStepIndex(rows: ReturnType<typeof mergePhasesAndSteps>, upTo: number): number {
+  let n = 0;
+  for (let i = 0; i <= upTo; i++) {
+    if (rows[i].kind === 'step') {
+      n += 1;
+    }
+  }
+  return n;
+}
+
 function PanelSubtitle({
   currentPhase,
   doneCount,
   totalCount,
+  phases,
+  indicatorText,
+  language,
   localize,
 }: {
   currentPhase: string | null;
   doneCount: number;
   totalCount: number;
+  phases: PhaseTable;
+  indicatorText: IndicatorTextConfig;
+  language: string;
   localize: ReturnType<typeof useLocalize>;
 }) {
-  const counter = localize('com_ui_progress_completed_count', {
-    done: String(doneCount),
-    total: String(totalCount),
-  });
-  if (!currentPhase) {
-    return <span className="truncate text-xs text-text-secondary">{counter}</span>;
+  const counter =
+    totalCount > 0
+      ? localize('com_ui_progress_completed_count', {
+          done: String(doneCount),
+          total: String(totalCount),
+        })
+      : null;
+  const phaseLabel = resolveLabel(currentPhase, phases, indicatorText, language);
+  const parts = [counter, phaseLabel].filter((s): s is string => !!s);
+  if (parts.length === 0) {
+    return null;
   }
   return (
-    <span className="truncate text-xs text-text-secondary" title={currentPhase}>
-      {counter} · {currentPhase}
+    <span className="truncate text-xs text-text-secondary" title={phaseLabel ?? undefined}>
+      {parts.join(' · ')}
     </span>
   );
 }
 
-function StepRow({ step, index }: { step: PlanStep; index: number }) {
+function PhaseRowView({
+  row,
+  phases,
+  language,
+}: {
+  row: PhaseRow;
+  phases: PhaseTable;
+  language: string;
+}) {
+  const Icon = phaseIcon(row.key);
+  const label = resolveLabel(row.key, phases, undefined, language) ?? row.key;
+  const isActive = row.status === 'active';
+  return (
+    <li className="flex items-start gap-3 py-2">
+      <PhaseBadge Icon={Icon} active={isActive} />
+      <span
+        className={`line-clamp-2 text-sm leading-tight ${
+          isActive ? 'text-text-primary' : 'text-text-tertiary'
+        }`}
+      >
+        {label}
+      </span>
+    </li>
+  );
+}
+
+function PhaseBadge({ Icon, active }: { Icon: LucideIcon; active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+        active
+          ? 'border border-blue-500 bg-surface-primary text-blue-500'
+          : 'bg-blue-500 text-white'
+      }`}
+    >
+      {active ? <Loader2 size={12} className="animate-spin" /> : <Icon size={12} />}
+    </span>
+  );
+}
+
+function StepRowView({
+  row,
+  index,
+  phases,
+  language,
+}: {
+  row: StepRowType;
+  index: number;
+  phases: PhaseTable;
+  language: string;
+}) {
+  const { step, children } = row;
   const isDone = step.status === 'done';
   const isError = step.status === 'error';
   const isActive = step.status === 'active';
   return (
-    <li className="flex items-start gap-3 py-2">
-      <span
-        aria-hidden
-        className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-          isDone
-            ? 'bg-blue-500 text-white'
-            : isError
-              ? 'bg-red-500 text-white'
-              : isActive
-                ? 'border border-blue-500 bg-surface-primary text-blue-500'
-                : 'border border-border-medium bg-surface-primary text-text-tertiary'
-        }`}
-      >
-        {isDone ? (
-          <Check size={12} strokeWidth={3} />
-        ) : isError ? (
-          <AlertCircle size={12} strokeWidth={3} />
-        ) : isActive ? (
-          <Loader2 size={12} className="animate-spin" />
-        ) : (
-          index
-        )}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
+    <li className="py-2">
+      <div className="flex items-start gap-3">
         <span
-          className={`line-clamp-3 text-sm leading-tight ${
+          aria-hidden
+          className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
             isDone
-              ? 'text-text-tertiary line-through'
-              : isActive
-                ? 'text-text-primary'
-                : 'text-text-secondary'
+              ? 'bg-blue-500 text-white'
+              : isError
+                ? 'bg-red-500 text-white'
+                : isActive
+                  ? 'border border-blue-500 bg-surface-primary text-blue-500'
+                  : 'border border-border-medium bg-surface-primary text-text-tertiary'
           }`}
-          title={step.description}
         >
-          {step.description}
+          {isDone ? (
+            <Check size={12} strokeWidth={3} />
+          ) : isError ? (
+            <AlertCircle size={12} strokeWidth={3} />
+          ) : isActive ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            index
+          )}
         </span>
-        <StepTiming step={step} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span
+            className={`line-clamp-3 text-sm leading-tight ${
+              isDone
+                ? 'text-text-tertiary line-through'
+                : isActive
+                  ? 'text-text-primary'
+                  : 'text-text-secondary'
+            }`}
+            title={step.description}
+          >
+            {step.description}
+          </span>
+          <StepTiming step={step} />
+        </div>
       </div>
+      {children.length > 0 && (
+        <ul className="ml-7 mt-1 border-l border-border-light pl-3">
+          {children.map((child) => (
+            <ChildPhaseRow
+              key={`${child.key}-${child.ts}`}
+              event={child}
+              phases={phases}
+              language={language}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function ChildPhaseRow({
+  event,
+  phases,
+  language,
+}: {
+  event: PhaseEvent;
+  phases: PhaseTable;
+  language: string;
+}) {
+  const Icon = phaseIcon(event.key);
+  const label = resolveLabel(event.key, phases, undefined, language) ?? event.key;
+  return (
+    <li className="flex items-center gap-2 py-1 text-xs text-text-tertiary">
+      <Icon size={11} aria-hidden className="flex-shrink-0" />
+      <span className="line-clamp-1">{label}</span>
     </li>
   );
 }

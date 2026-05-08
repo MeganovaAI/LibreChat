@@ -29,6 +29,7 @@ import {
   scrollToEnd,
   getAllContentText,
   stripPhaseMarkers,
+  stripPhaseMarkersAll,
   stripPlanMarkers,
   stripStepMarkers,
   applyPlanStepTransition,
@@ -196,6 +197,13 @@ export default function useEventHandlers({
   // <<<NOVA_STEP:id:status>>>. Same dispatch pattern as setCurrentPhase
   // — both message and step SSE paths feed it.
   const setPlanSteps = useSetRecoilState(store.planStepsAtom);
+  // Nova OS fork: append-only timeline of phase events for the current
+  // turn. messageHandler operates on the full running message-so-far on
+  // each SSE chunk, so we slice by lastSeenLength (per messageId) before
+  // re-stripping — that way each marker fires reportPhase exactly once
+  // even though the buffer keeps growing.
+  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
+  const lastDataLengthRef = useRef(new Map<string, number>());
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -221,7 +229,19 @@ export default function useEventHandlers({
       // the strip in useStepHandler.updateContent for the step-event path.
       // Then strip <<<NOVA_PLAN:...>>> and <<<NOVA_STEP:...>>> for the
       // ProgressPanel sidebar.
-      let text = stripPhaseMarkers(data ?? '', setCurrentPhase);
+      const fullData = data ?? '';
+      let text = stripPhaseMarkers(fullData, setCurrentPhase);
+      const messageId = initialResponse.messageId;
+      const seen = lastDataLengthRef.current.get(messageId) ?? 0;
+      const slice = seen > fullData.length ? fullData : fullData.slice(seen);
+      stripPhaseMarkersAll(slice, (key) => {
+        setPhaseEvents((prev) =>
+          prev.length > 0 && prev[prev.length - 1].key === key
+            ? prev
+            : [...prev, { key, ts: Date.now() }],
+        );
+      });
+      lastDataLengthRef.current.set(messageId, fullData.length);
       text = stripPlanMarkers(text, (steps) => {
         setPlanSteps(steps.map((s) => ({ ...s, status: 'pending' as const })));
       });
@@ -255,7 +275,7 @@ export default function useEventHandlers({
         ]);
       }
     },
-    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase, setPlanSteps],
+    [setMessages, announcePolite, setIsSubmitting, setCurrentPhase, setPlanSteps, setPhaseEvents],
   );
 
   const cancelHandler = useCallback(
@@ -291,8 +311,9 @@ export default function useEventHandlers({
       }
 
       setIsSubmitting(false);
+      setCurrentPhase(null);
     },
-    [setMessages, setConversation, isAddedRequest, queryClient, setIsSubmitting],
+    [setMessages, setConversation, isAddedRequest, queryClient, setIsSubmitting, setCurrentPhase],
   );
 
   const syncHandler = useCallback(
@@ -644,6 +665,7 @@ export default function useEventHandlers({
       } finally {
         setShowStopButton(false);
         setIsSubmitting(false);
+        setCurrentPhase(null);
       }
     },
     [
@@ -657,6 +679,7 @@ export default function useEventHandlers({
       setConversation,
       setIsSubmitting,
       setShowStopButton,
+      setCurrentPhase,
       location.pathname,
       applyAgentTemplate,
       attachmentHandler,
@@ -667,6 +690,7 @@ export default function useEventHandlers({
     ({ data, submission }: { data?: TResData; submission: EventSubmission }) => {
       const { messages, userMessage, initialResponse } = submission;
       setCompleted((prev) => new Set(prev.add(initialResponse.messageId)));
+      setCurrentPhase(null);
 
       const conversationId =
         userMessage.conversationId ?? submission.conversation?.conversationId ?? '';
@@ -759,6 +783,7 @@ export default function useEventHandlers({
       paramId,
       newConversation,
       setIsSubmitting,
+      setCurrentPhase,
       getMessages,
       queryClient,
     ],

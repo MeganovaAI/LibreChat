@@ -20,6 +20,7 @@ export * from './presets';
 export * from './prompts';
 export * from './novaPhase';
 export * from './novaPlan';
+export * from './progress';
 export * from './textarea';
 export * from './messages';
 export * from './redirect';

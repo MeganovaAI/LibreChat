@@ -34,6 +34,14 @@ export default function useSSE(
   const [completed, setCompleted] = useState(new Set());
   const setAbortScroll = useSetRecoilState(store.abortScrollFamily(runIndex));
   const setShowStopButton = useSetRecoilState(store.showStopButtonByIndex(runIndex));
+  // Nova OS fork: reset progress-panel atoms at submission start so a
+  // new turn begins with a clean activity timeline. The trap-door reset
+  // documented at progress.ts and EmptyText.tsx was never wired before;
+  // hooking it here (the one place a turn unambiguously starts) prevents
+  // phaseEvents/planSteps/currentPhase from leaking across messages.
+  const setCurrentPhase = useSetRecoilState(store.currentPhaseAtom);
+  const setPlanSteps = useSetRecoilState(store.planStepsAtom);
+  const setPhaseEvents = useSetRecoilState(store.phaseEventsAtom);
 
   const {
     setMessages,
@@ -85,6 +93,9 @@ export default function useSSE(
 
     let textIndex = null;
     clearStepMaps();
+    setCurrentPhase(null);
+    setPlanSteps([]);
+    setPhaseEvents([]);
 
     const sse = new SSE(payloadData.server, {
       payload: JSON.stringify(payload),
