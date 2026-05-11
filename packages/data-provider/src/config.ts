@@ -690,6 +690,15 @@ export const interfaceSchema = z
     termsOfService: termsOfServiceSchema.optional(),
     customWelcome: z.string().optional(),
     /**
+     * Nova OS fork: when set, new visitors (no cookie + no localStorage
+     * `lang`) land on this locale instead of `navigator.language`. Users
+     * who explicitly pick a language via settings keep their choice
+     * (sticky via localStorage). Use `"zh-Hans"` for the simplified-
+     * Chinese KCH tenant; leave absent for browser-detect behavior on
+     * other tenants. Read at app boot by `useApplyStartupLanguage`.
+     */
+    defaultLanguage: z.string().optional(),
+    /**
      * Nova OS fork: text to display in place of the dot animation while a
      * response is being generated but before the first content chunk
      * arrives. Useful for backends with high time-to-first-token (agentic

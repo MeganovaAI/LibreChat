@@ -44,6 +44,12 @@ export async function loadDefaultInterface({
     // phase.
     typingIndicatorText: interfaceConfig?.typingIndicatorText,
     typingIndicatorPhases: interfaceConfig?.typingIndicatorPhases,
+    // Nova OS fork: per-tenant default locale. Read by
+    // StartupLanguageManager at boot; if set AND the user has no
+    // cookie/localStorage `lang`, the lang atom is initialized to this
+    // value instead of navigator.language. Already projected to the
+    // anonymous payload in api/server/routes/config.js.
+    defaultLanguage: interfaceConfig?.defaultLanguage,
 
     // Permissions - only include if explicitly configured
     bookmarks: interfaceConfig?.bookmarks,
