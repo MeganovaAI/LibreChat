@@ -42,6 +42,34 @@ const STEP_RE = /<<<NOVA_STEP:([^:>]+):(started|done|error)>>>/g;
 const COMBINED_RE = /<<<NOVA_(?:PLAN|STEP):[^>]+>>>/g;
 
 /**
+ * Decode a base64-encoded UTF-8 JSON payload into a string preserving
+ * non-ASCII characters. The naive `atob(b64)` path returns a binary
+ * string where each char is a byte 0–255 — when the server emits
+ * Chinese plan-step labels (UTF-8 multi-byte sequences) and we feed
+ * that binary string directly to JSON.parse, each byte becomes its
+ * own Latin-1 codepoint and the resulting object renders as
+ * mojibake (e.g. "搜索知识库" → "æœç´¢ç¥è¯åº"). Observed on the
+ * bosong 2026-05-12 Progress sidebar after the server-side planner
+ * started honouring the request-language directive.
+ *
+ * We convert each binary byte to its `%XX` percent-escape sequence
+ * then run `decodeURIComponent`. That handles multi-byte UTF-8 in
+ * every browser since at least 2010 without depending on
+ * `TextDecoder` (which is absent from Jest's default jsdom
+ * environment — production browsers have it, but the test harness
+ * doesn't and we want this path covered by tests).
+ */
+function decodeBase64Utf8(b64: string): string {
+  const bin = atob(b64);
+  let escaped = '';
+  for (let i = 0; i < bin.length; i++) {
+    const hex = bin.charCodeAt(i).toString(16).padStart(2, '0');
+    escaped += '%' + hex;
+  }
+  return decodeURIComponent(escaped);
+}
+
+/**
  * Nova OS fork — strip <<<NOVA_PLAN:base64-json>>> markers from streamed
  * text and forward the parsed step list to the caller (typically a Recoil
  * setter for `planStepsAtom`). Sibling of `stripPhaseMarkers` in
@@ -67,7 +95,7 @@ export function stripPlanMarkers(
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     try {
-      const decoded = atob(m[1]);
+      const decoded = decodeBase64Utf8(m[1]);
       const parsed: unknown = JSON.parse(decoded);
       if (Array.isArray(parsed)) {
         lastPlan = parsed as PlanStepWire[];
