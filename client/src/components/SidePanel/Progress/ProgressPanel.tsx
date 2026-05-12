@@ -54,10 +54,23 @@ const ProgressPanel = memo(function ProgressPanel() {
   const hasContent = rows.length > 0;
 
   if (collapsed) {
+    // For CJK locales (zh / ja / ko) the natural vertical reading is
+    // `writing-mode: vertical-rl` ALONE — characters stack top-to-bottom
+    // right-side-up. The Latin convention adds `transform: rotate(180deg)`
+    // so the text reads bottom-to-top with letters upright (a book-spine
+    // pattern). Applying the rotation to CJK flips characters upside down
+    // (bosong 2026-05-12 reproduction — "进度" / "整理回答中" appeared
+    // inverted in the collapsed rail). Choose the rotation per-label by
+    // sniffing the resolved string for CJK codepoints.
+    const progressLabel = localize('com_ui_progress');
+    const isCJKLabel = /[一-鿿぀-ヿ가-힯]/.test(progressLabel);
+    const verticalLabelStyle: React.CSSProperties = isCJKLabel
+      ? { writingMode: 'vertical-rl' }
+      : { writingMode: 'vertical-rl', transform: 'rotate(180deg)' };
     return (
       <aside
         className="fixed right-0 top-16 z-40 hidden md:block"
-        aria-label={localize('com_ui_progress')}
+        aria-label={progressLabel}
       >
         <button
           type="button"
@@ -69,9 +82,9 @@ const ProgressPanel = memo(function ProgressPanel() {
           <ChevronLeft size={14} className="text-text-secondary" />
           <span
             className="text-xs font-medium text-text-secondary"
-            style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+            style={verticalLabelStyle}
           >
-            {localize('com_ui_progress')}
+            {progressLabel}
           </span>
           {activeCount > 0 ? (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-semibold text-white">
