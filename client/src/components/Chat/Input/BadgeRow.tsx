@@ -328,7 +328,12 @@ function BadgeRow({
       isSubmitting={isSubmitting}
     >
       <div ref={containerRef} className="relative flex flex-wrap items-center gap-2">
-        {showEphemeralBadges === true && <ToolsDropdown />}
+        {/* Nova OS / kch-dev fork: the ToolsDropdown (工具) button is
+            hidden — tenant request to keep the chat input lean. The
+            sub-controls it exposed (web search, code interpreter,
+            artifacts, file search) are routed via persona capability
+            flags instead of a per-turn picker. Reverting to upstream
+            UX = re-introduce <ToolsDropdown /> here. */}
         {tempBadges.map((badge, index) => (
           <React.Fragment key={badge.id}>
             {dragState.draggedBadge && dragState.insertIndex === index && ghostBadge && (
