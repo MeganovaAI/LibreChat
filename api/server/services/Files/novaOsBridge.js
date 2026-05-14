@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
 const { logger } = require('@librechat/data-schemas');
@@ -36,30 +37,53 @@ const { logger } = require('@librechat/data-schemas');
  */
 
 /**
- * Pulls the user's nova-os JWT from wherever LibreChat stashed it.
- * setOpenIDAuthTokens (api/server/services/AuthService.js) writes to
- * req.session.openidTokens.idToken when express-session is available,
- * otherwise falls back to res.cookie('openid_id_token', ...). On the
- * bosong tenant the session DB shows every record with
- * hasOpenidTokens:false, so the cookie path is the one that actually
- * carries the token in production.
+ * Mints a fresh nova-os JWT for the OIDC user attached to this request.
  *
- * Returns the token string or '' when neither path has it.
+ * Why mint instead of forwarding the user's OIDC tokens: bosong 2026-05-14
+ * investigation showed LibreChat's setOpenIDAuthTokens is gated by
+ * OPENID_REUSE_TOKENS, which when enabled tries to validate the bearer
+ * via JWKS — but nova-os signs HS256 (symmetric secret), no JWKS
+ * exists, so enabling REUSE_TOKENS broke SSO entirely. The
+ * cookie/session path therefore never persists nova-os tokens on this
+ * deployment. Minting inline with the shared NOVA_OS_JWT_SECRET
+ * sidesteps the entire token-passthrough mess.
+ *
+ * Identity model: token's claims are the teacher's. sub = openidId
+ * (which IS the teacher's nova-os UUID, set by the OIDC sub claim
+ * during initial SSO). role = 'employee' so server-side authz scopes
+ * to the teacher's own collection. No admin escalation.
+ *
+ * Token has a 5-minute TTL — used immediately for the bridge POST and
+ * never persisted. Each upload mints a fresh one.
+ *
+ * Returns the JWT string, or '' when prerequisites are missing
+ * (env unset, user missing openidId).
  */
-function getNovaOsToken(req) {
-  if (req?.session?.openidTokens?.idToken) {
-    return req.session.openidTokens.idToken;
+function mintNovaOsToken(req) {
+  const secret = process.env.NOVA_OS_JWT_SECRET;
+  if (!secret) {
+    return '';
   }
-  if (req?.cookies?.openid_id_token) {
-    return req.cookies.openid_id_token;
+  if (!req?.user?.openidId || !req?.user?.email) {
+    return '';
   }
-  return '';
+  return jwt.sign(
+    {
+      sub: req.user.openidId,
+      email: req.user.email,
+      role: 'employee',
+    },
+    secret,
+    { algorithm: 'HS256', expiresIn: '5m' },
+  );
 }
 
 /**
  * @returns {boolean} true if the bridge is configured + the user is
- *   eligible. False (silent) otherwise. Use this to decide whether to
- *   bother reading the file off disk before posting.
+ *   eligible. False otherwise — with a one-line warn log naming the
+ *   specific reason so deployment misconfigurations (env unset, user
+ *   not OIDC, no token reaching the request) are visible without
+ *   adding ad-hoc debug code each time.
  *
  * Env is read at call time (not module load) so a tenant operator can
  * flip NOVA_OS_BRIDGE_URL without restarting LibreChat — same shape as
@@ -67,18 +91,23 @@ function getNovaOsToken(req) {
  */
 function bridgeApplies(req) {
   if (!process.env.NOVA_OS_BRIDGE_URL) {
+    logger.debug('[novaOsBridge] skip: NOVA_OS_BRIDGE_URL unset');
+    return false;
+  }
+  if (!process.env.NOVA_OS_JWT_SECRET) {
+    logger.warn('[novaOsBridge] skip: NOVA_OS_JWT_SECRET unset (cannot mint user token for bridge POST)');
     return false;
   }
   if (!req?.user) {
+    logger.warn('[novaOsBridge] skip: req.user missing');
     return false;
   }
   if (req.user.provider !== 'openid') {
+    logger.info(`[novaOsBridge] skip: user ${req.user.email} provider=${req.user.provider} (only openid users bridge to nova-os)`);
     return false;
   }
   if (!req.user.openidId) {
-    return false;
-  }
-  if (!getNovaOsToken(req)) {
+    logger.warn(`[novaOsBridge] skip: user ${req.user.email} has no openidId on record`);
     return false;
   }
   return true;
@@ -102,7 +131,10 @@ async function bridgeUpload({ req, filePath, filename, contentType }) {
   }
 
   const userId = req.user.openidId;
-  const token = getNovaOsToken(req);
+  const token = mintNovaOsToken(req);
+  if (!token) {
+    return { status: 'error', detail: 'failed to mint nova-os token (env or user shape missing)' };
+  }
   // The collection ID convention is "user_<uuid>" — must match what
   // nova-os's authz scope (scope.OwnCollectionID) computes for the same
   // user. Forcing it here via the form field means the upload lands in

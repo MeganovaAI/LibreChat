@@ -1,5 +1,5 @@
 jest.mock('@librechat/data-schemas', () => ({
-  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
 }));
 jest.mock('node-fetch', () => jest.fn());
 jest.mock('fs', () => ({
@@ -8,89 +8,85 @@ jest.mock('fs', () => ({
 
 const fetch = require('node-fetch');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
-const ORIG_ENV = process.env.NOVA_OS_BRIDGE_URL;
+const ORIG_URL = process.env.NOVA_OS_BRIDGE_URL;
+const ORIG_SECRET = process.env.NOVA_OS_JWT_SECRET;
 
-// Module reads env lazily via process.env in each call, so no need to
-// reset modules between tests — flipping NOVA_OS_BRIDGE_URL in a beforeEach
-// is sufficient.
+// Module reads env lazily via process.env in each call, so flipping env
+// in beforeEach is sufficient — no resetModules needed.
 const novaOsBridge = require('./novaOsBridge');
+
+const TEST_SECRET = 'test-shared-secret-12345678';
 
 function oidcReq(overrides = {}) {
   return {
-    user: { provider: 'openid', openidId: 'teacher-uuid-123' },
-    session: { openidTokens: { idToken: 'jwt-payload-here' } },
+    user: {
+      provider: 'openid',
+      openidId: 'teacher-uuid-123',
+      email: 'teacher@example.com',
+    },
     ...overrides,
   };
 }
 
 afterEach(() => {
-  if (ORIG_ENV === undefined) {
+  if (ORIG_URL === undefined) {
     delete process.env.NOVA_OS_BRIDGE_URL;
   } else {
-    process.env.NOVA_OS_BRIDGE_URL = ORIG_ENV;
+    process.env.NOVA_OS_BRIDGE_URL = ORIG_URL;
+  }
+  if (ORIG_SECRET === undefined) {
+    delete process.env.NOVA_OS_JWT_SECRET;
+  } else {
+    process.env.NOVA_OS_JWT_SECRET = ORIG_SECRET;
   }
   jest.clearAllMocks();
 });
 
 describe('bridgeApplies', () => {
-  it('returns false when NOVA_OS_BRIDGE_URL is unset (feature disabled)', () => {
+  it('returns false when NOVA_OS_BRIDGE_URL is unset', () => {
     delete process.env.NOVA_OS_BRIDGE_URL;
-    const { bridgeApplies } = novaOsBridge;
-    expect(bridgeApplies(oidcReq())).toBe(false);
+    process.env.NOVA_OS_JWT_SECRET = TEST_SECRET;
+    expect(novaOsBridge.bridgeApplies(oidcReq())).toBe(false);
+  });
+
+  it('returns false when NOVA_OS_JWT_SECRET is unset (cannot mint)', () => {
+    process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
+    delete process.env.NOVA_OS_JWT_SECRET;
+    expect(novaOsBridge.bridgeApplies(oidcReq())).toBe(false);
   });
 
   it('returns false for local-auth users even when env is set', () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
-    const { bridgeApplies } = novaOsBridge;
+    process.env.NOVA_OS_JWT_SECRET = TEST_SECRET;
     const req = oidcReq({ user: { provider: 'local', openidId: null } });
-    expect(bridgeApplies(req)).toBe(false);
+    expect(novaOsBridge.bridgeApplies(req)).toBe(false);
   });
 
-  it('returns false when openidId is missing (broken OIDC user)', () => {
+  it('returns false when openidId is missing', () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
-    const { bridgeApplies } = novaOsBridge;
+    process.env.NOVA_OS_JWT_SECRET = TEST_SECRET;
     const req = oidcReq({ user: { provider: 'openid', openidId: null } });
-    expect(bridgeApplies(req)).toBe(false);
+    expect(novaOsBridge.bridgeApplies(req)).toBe(false);
   });
 
-  it('returns false when token is in NEITHER session nor cookies', () => {
+  it('returns true for OIDC user with both env + openidId', () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
-    const { bridgeApplies } = novaOsBridge;
-    const req = oidcReq({ session: {}, cookies: {} });
-    expect(bridgeApplies(req)).toBe(false);
-  });
-
-  it('returns true for OIDC user with session-stored token', () => {
-    process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
-    const { bridgeApplies } = novaOsBridge;
-    expect(bridgeApplies(oidcReq())).toBe(true);
-  });
-
-  it('returns true for OIDC user with cookie-stored token (HttpOnly fallback)', () => {
-    // setOpenIDAuthTokens falls back to res.cookie('openid_id_token', ...)
-    // when express-session is unavailable. On bosong tenant production,
-    // every session record is hasOpenidTokens:false — the cookie path
-    // is the one carrying the token. Bridge must read both.
-    process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
-    const { bridgeApplies } = novaOsBridge;
-    const req = oidcReq({
-      session: {},
-      cookies: { openid_id_token: 'jwt-from-cookie' },
-    });
-    expect(bridgeApplies(req)).toBe(true);
+    process.env.NOVA_OS_JWT_SECRET = TEST_SECRET;
+    expect(novaOsBridge.bridgeApplies(oidcReq())).toBe(true);
   });
 });
 
 describe('bridgeUpload', () => {
   beforeEach(() => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
+    process.env.NOVA_OS_JWT_SECRET = TEST_SECRET;
   });
 
-  it('skips silently when not applicable (no thrown error, no fetch)', async () => {
-    const { bridgeUpload } = novaOsBridge;
-    const req = oidcReq({ user: { provider: 'local' } });
-    const res = await bridgeUpload({
+  it('skips silently when not applicable', async () => {
+    const req = oidcReq({ user: { provider: 'local', email: 'x@y.z' } });
+    const res = await novaOsBridge.bridgeUpload({
       req,
       filePath: '/tmp/x',
       filename: 'x.csv',
@@ -99,10 +95,9 @@ describe('bridgeUpload', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('POSTs to /api/documents/upload/ (no users/<id> segment) with the user JWT', async () => {
+  it('POSTs to /api/documents/upload/ with a freshly-minted user JWT', async () => {
     fetch.mockResolvedValue({ ok: true, status: 200 });
-    const { bridgeUpload } = novaOsBridge;
-    const res = await bridgeUpload({
+    const res = await novaOsBridge.bridgeUpload({
       req: oidcReq(),
       filePath: '/tmp/grades.csv',
       filename: 'grades.csv',
@@ -111,38 +106,22 @@ describe('bridgeUpload', () => {
     expect(res.status).toBe('ok');
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, opts] = fetch.mock.calls[0];
-    // Empty wildcard path; server-side RewritePath("") returns
-    // "users/<scope.UserID>" for non-admin so the file lands at the
-    // right place. Hitting /users/<id> directly trips
-    // assertUserVisiblePath and 403s — see bridge file comment.
     expect(url).toBe('https://kch.os.meganovaai.com/api/documents/upload/');
     expect(url).not.toContain('/users/');
     expect(opts.method).toBe('POST');
-    expect(opts.headers.Authorization).toBe('Bearer jwt-payload-here');
+    // Bearer token should be a freshly-minted JWT signed with our shared secret
+    expect(opts.headers.Authorization).toMatch(/^Bearer eyJ/);
+    const token = opts.headers.Authorization.replace(/^Bearer /, '');
+    const decoded = jwt.verify(token, TEST_SECRET, { algorithms: ['HS256'] });
+    expect(decoded.sub).toBe('teacher-uuid-123');
+    expect(decoded.email).toBe('teacher@example.com');
+    expect(decoded.role).toBe('employee');
   });
 
-  it('reads token from cookies when session has none (HttpOnly fallback)', async () => {
-    fetch.mockResolvedValue({ ok: true, status: 200 });
-    const { bridgeUpload } = novaOsBridge;
-    const req = oidcReq({
-      session: {},
-      cookies: { openid_id_token: 'cookie-jwt-xyz' },
-    });
-    const res = await bridgeUpload({
-      req,
-      filePath: '/tmp/x.csv',
-      filename: 'x.csv',
-    });
-    expect(res.status).toBe('ok');
-    const [, opts] = fetch.mock.calls[0];
-    expect(opts.headers.Authorization).toBe('Bearer cookie-jwt-xyz');
-  });
-
-  it('strips a trailing slash on NOVA_OS_BRIDGE_URL so we never POST to //api/...', async () => {
+  it('strips a trailing slash on NOVA_OS_BRIDGE_URL', async () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com/';
     fetch.mockResolvedValue({ ok: true, status: 200 });
-    const { bridgeUpload } = novaOsBridge;
-    await bridgeUpload({
+    await novaOsBridge.bridgeUpload({
       req: oidcReq(),
       filePath: '/tmp/x.csv',
       filename: 'x.csv',
@@ -152,14 +131,13 @@ describe('bridgeUpload', () => {
     expect(url).toBe('https://kch.os.meganovaai.com/api/documents/upload/');
   });
 
-  it('returns error status without throwing on HTTP 401 (token expired)', async () => {
+  it('returns error status without throwing on HTTP 401 (bad secret)', async () => {
     fetch.mockResolvedValue({
       ok: false,
       status: 401,
-      text: () => Promise.resolve('{"error":"unauthenticated"}'),
+      text: () => Promise.resolve('{"error":"invalid token"}'),
     });
-    const { bridgeUpload } = novaOsBridge;
-    const res = await bridgeUpload({
+    const res = await novaOsBridge.bridgeUpload({
       req: oidcReq(),
       filePath: '/tmp/x.csv',
       filename: 'x.csv',
@@ -170,8 +148,7 @@ describe('bridgeUpload', () => {
 
   it('returns error status without throwing on network failure', async () => {
     fetch.mockRejectedValue(new Error('ECONNREFUSED'));
-    const { bridgeUpload } = novaOsBridge;
-    const res = await bridgeUpload({
+    const res = await novaOsBridge.bridgeUpload({
       req: oidcReq(),
       filePath: '/tmp/x.csv',
       filename: 'x.csv',
@@ -182,19 +159,11 @@ describe('bridgeUpload', () => {
 
   it('basenames the filename so a malicious "../../etc/passwd" never propagates', async () => {
     fetch.mockResolvedValue({ ok: true, status: 200 });
-    // We can't directly assert the form-data field name from outside the
-    // FormData object easily, but we CAN assert that path.basename was
-    // applied — by ensuring the streamed file came from the original
-    // path, not a manipulated one. The bridge's path.basename(filename)
-    // call is the load-bearing piece.
-    const { bridgeUpload } = novaOsBridge;
-    await bridgeUpload({
+    await novaOsBridge.bridgeUpload({
       req: oidcReq(),
       filePath: '/tmp/legit.csv',
       filename: '../../etc/passwd',
     });
-    // fs.createReadStream was called with the trusted disk path, not the
-    // attacker-supplied filename — that's the contract that matters.
     expect(fs.createReadStream).toHaveBeenCalledWith('/tmp/legit.csv');
   });
 });
