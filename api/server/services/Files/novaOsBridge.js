@@ -36,6 +36,27 @@ const { logger } = require('@librechat/data-schemas');
  */
 
 /**
+ * Pulls the user's nova-os JWT from wherever LibreChat stashed it.
+ * setOpenIDAuthTokens (api/server/services/AuthService.js) writes to
+ * req.session.openidTokens.idToken when express-session is available,
+ * otherwise falls back to res.cookie('openid_id_token', ...). On the
+ * bosong tenant the session DB shows every record with
+ * hasOpenidTokens:false, so the cookie path is the one that actually
+ * carries the token in production.
+ *
+ * Returns the token string or '' when neither path has it.
+ */
+function getNovaOsToken(req) {
+  if (req?.session?.openidTokens?.idToken) {
+    return req.session.openidTokens.idToken;
+  }
+  if (req?.cookies?.openid_id_token) {
+    return req.cookies.openid_id_token;
+  }
+  return '';
+}
+
+/**
  * @returns {boolean} true if the bridge is configured + the user is
  *   eligible. False (silent) otherwise. Use this to decide whether to
  *   bother reading the file off disk before posting.
@@ -57,8 +78,7 @@ function bridgeApplies(req) {
   if (!req.user.openidId) {
     return false;
   }
-  const token = req?.session?.openidTokens?.idToken;
-  if (!token) {
+  if (!getNovaOsToken(req)) {
     return false;
   }
   return true;
@@ -82,7 +102,7 @@ async function bridgeUpload({ req, filePath, filename, contentType }) {
   }
 
   const userId = req.user.openidId;
-  const token = req.session.openidTokens.idToken;
+  const token = getNovaOsToken(req);
   // The collection ID convention is "user_<uuid>" — must match what
   // nova-os's authz scope (scope.OwnCollectionID) computes for the same
   // user. Forcing it here via the form field means the upload lands in

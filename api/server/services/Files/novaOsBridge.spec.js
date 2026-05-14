@@ -54,17 +54,31 @@ describe('bridgeApplies', () => {
     expect(bridgeApplies(req)).toBe(false);
   });
 
-  it('returns false when no idToken in session (logged in via cookie fallback)', () => {
+  it('returns false when token is in NEITHER session nor cookies', () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
     const { bridgeApplies } = novaOsBridge;
-    const req = oidcReq({ session: {} });
+    const req = oidcReq({ session: {}, cookies: {} });
     expect(bridgeApplies(req)).toBe(false);
   });
 
-  it('returns true for OIDC user with token + env set', () => {
+  it('returns true for OIDC user with session-stored token', () => {
     process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
     const { bridgeApplies } = novaOsBridge;
     expect(bridgeApplies(oidcReq())).toBe(true);
+  });
+
+  it('returns true for OIDC user with cookie-stored token (HttpOnly fallback)', () => {
+    // setOpenIDAuthTokens falls back to res.cookie('openid_id_token', ...)
+    // when express-session is unavailable. On bosong tenant production,
+    // every session record is hasOpenidTokens:false — the cookie path
+    // is the one carrying the token. Bridge must read both.
+    process.env.NOVA_OS_BRIDGE_URL = 'https://kch.os.meganovaai.com';
+    const { bridgeApplies } = novaOsBridge;
+    const req = oidcReq({
+      session: {},
+      cookies: { openid_id_token: 'jwt-from-cookie' },
+    });
+    expect(bridgeApplies(req)).toBe(true);
   });
 });
 
@@ -105,6 +119,23 @@ describe('bridgeUpload', () => {
     expect(url).not.toContain('/users/');
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe('Bearer jwt-payload-here');
+  });
+
+  it('reads token from cookies when session has none (HttpOnly fallback)', async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200 });
+    const { bridgeUpload } = novaOsBridge;
+    const req = oidcReq({
+      session: {},
+      cookies: { openid_id_token: 'cookie-jwt-xyz' },
+    });
+    const res = await bridgeUpload({
+      req,
+      filePath: '/tmp/x.csv',
+      filename: 'x.csv',
+    });
+    expect(res.status).toBe('ok');
+    const [, opts] = fetch.mock.calls[0];
+    expect(opts.headers.Authorization).toBe('Bearer cookie-jwt-xyz');
   });
 
   it('strips a trailing slash on NOVA_OS_BRIDGE_URL so we never POST to //api/...', async () => {
