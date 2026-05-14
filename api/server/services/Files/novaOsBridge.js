@@ -86,16 +86,22 @@ async function bridgeUpload({ req, filePath, filename, contentType }) {
   // The collection ID convention is "user_<uuid>" — must match what
   // nova-os's authz scope (scope.OwnCollectionID) computes for the same
   // user. Forcing it here via the form field means the upload lands in
-  // the right knowledge collection regardless of the path the URL
-  // wildcard happens to resolve to.
+  // the right knowledge collection regardless of how the path resolves.
   const collection = `user_${userId}`;
-  // Path: users/<uuid>/<filename>. Server-side RewritePath is a no-op
-  // for the user's own-dir case (they're posting to their own home),
-  // but we send the explicit path for clarity + for symmetry with the
-  // nova-os Documents page upload.
+  // URL: /api/documents/upload/ (trailing slash → empty wildcard).
+  // CRITICAL: do NOT send "users/<id>" in the URL path. Nova-os's
+  // assertUserVisiblePath rejects any non-admin caller that posts to
+  // a path beginning with the internal "users/" namespace (it's the
+  // server's reserved tag, not a client-addressable directory). Sending
+  // empty path triggers RewritePath("") which for non-admin returns
+  // "users/<scope.UserID>" automatically — so the file lands at
+  // users/<teacher_id>/<filename> via server-side rewriting, exactly
+  // like the dashboard's Documents page upload after the Phase 1A fix.
+  // Bug bosong-2026-05-14: prior shape posted to /api/documents/upload/users/<id>
+  // and got 403 "access denied" from assertUserVisiblePath.
   const safeName = path.basename(filename || 'file');
   const baseUrl = process.env.NOVA_OS_BRIDGE_URL;
-  const target = `${baseUrl.replace(/\/+$/, '')}/api/documents/upload/users/${encodeURIComponent(userId)}`;
+  const target = `${baseUrl.replace(/\/+$/, '')}/api/documents/upload/`;
 
   let stream;
   try {

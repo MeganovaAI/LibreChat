@@ -85,7 +85,7 @@ describe('bridgeUpload', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('POSTs to /api/documents/upload/users/<openidId> with the user JWT', async () => {
+  it('POSTs to /api/documents/upload/ (no users/<id> segment) with the user JWT', async () => {
     fetch.mockResolvedValue({ ok: true, status: 200 });
     const { bridgeUpload } = novaOsBridge;
     const res = await bridgeUpload({
@@ -97,9 +97,12 @@ describe('bridgeUpload', () => {
     expect(res.status).toBe('ok');
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, opts] = fetch.mock.calls[0];
-    expect(url).toBe(
-      'https://kch.os.meganovaai.com/api/documents/upload/users/teacher-uuid-123',
-    );
+    // Empty wildcard path; server-side RewritePath("") returns
+    // "users/<scope.UserID>" for non-admin so the file lands at the
+    // right place. Hitting /users/<id> directly trips
+    // assertUserVisiblePath and 403s — see bridge file comment.
+    expect(url).toBe('https://kch.os.meganovaai.com/api/documents/upload/');
+    expect(url).not.toContain('/users/');
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe('Bearer jwt-payload-here');
   });
@@ -115,9 +118,7 @@ describe('bridgeUpload', () => {
     });
     const [url] = fetch.mock.calls[0];
     expect(url).not.toContain('//api/');
-    expect(url).toBe(
-      'https://kch.os.meganovaai.com/api/documents/upload/users/teacher-uuid-123',
-    );
+    expect(url).toBe('https://kch.os.meganovaai.com/api/documents/upload/');
   });
 
   it('returns error status without throwing on HTTP 401 (token expired)', async () => {
