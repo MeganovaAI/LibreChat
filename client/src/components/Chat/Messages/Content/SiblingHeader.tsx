@@ -72,11 +72,15 @@ export default function SiblingHeader({
         };
       }
 
-      // Try to parse as ephemeral agent ID (endpoint__model___sender format)
+      // Try to parse as ephemeral agent ID (endpoint__model___sender format).
+      // Prefer the model id (e.g. "bi-assistant") over sender — in custom
+      // endpoints sender resolves to modelDisplayLabel (e.g. "Nova OS") and
+      // every split-panel column would render identically, defeating
+      // multi-convo's purpose.
       const parsed = parseEphemeralAgentId(agentId);
       if (parsed) {
         return {
-          displayName: parsed.sender || parsed.model || 'AI',
+          displayName: parsed.model || parsed.sender || 'AI',
           displayEndpoint: parsed.endpoint,
           displayModel: parsed.model,
           agent: undefined,
