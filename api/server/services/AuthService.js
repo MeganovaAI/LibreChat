@@ -528,14 +528,32 @@ const setOpenIDAuthTokens = (tokenset, req, res, userId, existingRefreshToken) =
         secure: shouldUseSecureCookie(),
         sameSite: 'strict',
       });
-      if (tokenset.id_token) {
-        res.cookie('openid_id_token', tokenset.id_token, {
-          expires: expirationDate,
-          httpOnly: true,
-          secure: shouldUseSecureCookie(),
-          sameSite: 'strict',
-        });
-      }
+    }
+    /**
+     * ALWAYS set openid_id_token as an HttpOnly cookie (in addition to
+     * the session above). Belt-and-suspenders so the bearer survives
+     * session loss — the load-bearing scenarios on the bosong tenant
+     * 2026-05-14:
+     *   - express-session storing in MemoryStore that empties on
+     *     LibreChat container restart (every redeploy clears it),
+     *   - mongo-backed session-store entries showing
+     *     hasOpenidTokens:false (cause TBD; possibly a save-after-write
+     *     race in the OIDC callback path).
+     * Either way, downstream consumers (e.g. the Nova OS upload bridge
+     * at services/Files/novaOsBridge.js) need to reach the id_token at
+     * arbitrary later request times. The id_token is a compact HS256
+     * JWT (~700 bytes for the nova-os claims shape) so it fits well
+     * within typical cookie size limits — the size-driven motivation
+     * for moving access_token off cookies (some IdPs return multi-KB
+     * opaque tokens) doesn't apply to the compact id_token here.
+     */
+    if (tokenset.id_token) {
+      res.cookie('openid_id_token', tokenset.id_token, {
+        expires: expirationDate,
+        httpOnly: true,
+        secure: shouldUseSecureCookie(),
+        sameSite: 'strict',
+      });
     }
 
     /** Small cookie to indicate token provider (required for auth middleware) */
