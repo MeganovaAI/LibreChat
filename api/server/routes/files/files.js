@@ -26,6 +26,7 @@ const {
 } = require('~/server/services/Files/process');
 const { fileAccess } = require('~/server/middleware/accessResources/fileAccess');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
+const { bridgeApplies, bridgeUpload } = require('~/server/services/Files/novaOsBridge');
 const { getOpenAIClient } = require('~/server/controllers/assistants/helpers');
 const { hasCapability } = require('~/server/middleware/roles/capabilities');
 const { checkPermission } = require('~/server/services/PermissionService');
@@ -369,6 +370,38 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
   }
 });
 
+/**
+ * Fire the Nova OS bridge after the LibreChat upload handler returns.
+ * The bridge reads the temp file off disk, POSTs it to nova-os, then
+ * unlinks the file. We use setImmediate so the response is flushed
+ * first — chat-upload latency stays at whatever processFileUpload took.
+ *
+ * Errors from the bridge are logged inside bridgeUpload itself and never
+ * propagate. Cleanup runs in a finally so the temp file is always
+ * removed even if the bridge throws unexpectedly.
+ */
+function scheduleNovaOsBridge(req, bridgeArgs) {
+  if (!bridgeArgs) {
+    return;
+  }
+  setImmediate(async () => {
+    try {
+      await bridgeUpload({ req, ...bridgeArgs });
+    } catch (err) {
+      logger.warn(`[/files] novaOsBridge unexpected error: ${err.message}`);
+    } finally {
+      try {
+        await fs.unlink(bridgeArgs.filePath);
+      } catch (err) {
+        // ENOENT is fine — processFileUpload may have already unlinked.
+        if (err.code !== 'ENOENT') {
+          logger.warn(`[/files] post-bridge unlink failed: ${err.message}`);
+        }
+      }
+    }
+  });
+}
+
 router.post('/', async (req, res) => {
   const metadata = req.body;
   let cleanup = true;
@@ -379,8 +412,32 @@ router.post('/', async (req, res) => {
     metadata.temp_file_id = metadata.file_id;
     metadata.file_id = req.file_id;
 
+    // Nova OS bridge: snapshot the binary path / filename / mime BEFORE
+    // processFileUpload runs because that path may move or unlink the
+    // temp file as part of OCR processing. The bridge POST itself fires
+    // AFTER the LibreChat handler returns its response (deferred via
+    // setImmediate) so chat-upload latency is unchanged. Bridge is a
+    // no-op for non-OIDC users + when NOVA_OS_BRIDGE_URL is unset.
+    const bridgeArgs =
+      bridgeApplies(req) && req.file
+        ? {
+            filePath: req.file.path,
+            filename: req.file.originalname,
+            contentType: req.file.mimetype,
+          }
+        : null;
+    if (bridgeArgs) {
+      // Defer cleanup so the bridge gets a chance to read the file
+      // off disk after the response is sent. We unlink ourselves
+      // after the bridge resolves (success or failure) — see the
+      // setImmediate block below.
+      cleanup = false;
+    }
+
     if (isAssistantsEndpoint(metadata.endpoint)) {
-      return await processFileUpload({ req, res, metadata });
+      const result = await processFileUpload({ req, res, metadata });
+      scheduleNovaOsBridge(req, bridgeArgs);
+      return result;
     }
 
     let skipUploadAuth = false;
@@ -403,7 +460,9 @@ router.post('/', async (req, res) => {
       }
     }
 
-    return await processAgentFileUpload({ req, res, metadata });
+    const result = await processAgentFileUpload({ req, res, metadata });
+    scheduleNovaOsBridge(req, bridgeArgs);
+    return result;
   } catch (error) {
     const message = resolveUploadErrorMessage(error);
     logger.error('[/files] Error processing file:', error);
