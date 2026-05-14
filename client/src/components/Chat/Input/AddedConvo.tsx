@@ -1,11 +1,19 @@
-import { useMemo } from 'react';
-import { isAgentsEndpoint } from 'librechat-data-provider';
 import type { TConversation } from 'librechat-data-provider';
 import type { SetterOrUpdater } from 'recoil';
-import { useGetEndpointsQuery } from '~/data-provider';
-import { EndpointIcon } from '~/components/Endpoints';
-import { useAgentsMapContext } from '~/Providers';
+import { useGetStartupConfig } from '~/data-provider';
+import ModelSelector from '~/components/Chat/Menus/Endpoints/ModelSelector';
 
+/**
+ * AddedConvo renders the chip above the textarea that represents the second
+ * (side-by-side / multi-convo) conversation. Click the embedded model
+ * selector to pick a different agent / model for the added pane — this
+ * unlocks A/B testing across two endpoints from a single prompt.
+ *
+ * The model picker drives `conversationByIndex(1)` directly via the
+ * `index={1}` prop on `<ModelSelector>` (added 2026-05-14). The data
+ * layer (useNewConvo, useGetConversation, store.conversationXxxByIndex)
+ * was already index-aware; the picker UI just wasn't surfacing it.
+ */
 export default function AddedConvo({
   addedConvo,
   setAddedConvo,
@@ -13,43 +21,17 @@ export default function AddedConvo({
   addedConvo: TConversation | null;
   setAddedConvo: SetterOrUpdater<TConversation | null>;
 }) {
-  const agentsMap = useAgentsMapContext();
-  const { data: endpointsConfig } = useGetEndpointsQuery();
-  const title = useMemo(() => {
-    // Priority: agent name > modelDisplayLabel > modelLabel > model
-    if (isAgentsEndpoint(addedConvo?.endpoint) && addedConvo?.agent_id) {
-      const agent = agentsMap?.[addedConvo.agent_id];
-      if (agent?.name) {
-        return `+ ${agent.name}`;
-      }
-    }
-
-    const endpointConfig = endpointsConfig?.[addedConvo?.endpoint ?? ''];
-    const displayLabel =
-      endpointConfig?.modelDisplayLabel || addedConvo?.modelLabel || addedConvo?.model || 'AI';
-
-    return `+ ${displayLabel}`;
-  }, [addedConvo, agentsMap, endpointsConfig]);
+  const { data: startupConfig } = useGetStartupConfig();
 
   if (!addedConvo) {
     return null;
   }
   return (
-    <div className="flex items-start gap-4 py-2.5 pl-3 pr-1.5 text-sm">
-      <span className="mt-0 flex h-6 w-6 flex-shrink-0 items-center justify-center">
-        <div className="icon-md">
-          <EndpointIcon
-            conversation={addedConvo}
-            endpointsConfig={endpointsConfig}
-            containerClassName="shadow-stroke overflow-hidden rounded-full"
-            context="menu-item"
-            size={20}
-          />
-        </div>
-      </span>
-      <span className="text-token-text-secondary line-clamp-3 flex-1 py-0.5 font-semibold">
-        {title}
-      </span>
+    <div className="flex items-center gap-2 py-2 pl-2 pr-1.5 text-sm">
+      <span className="flex-shrink-0 select-none font-semibold text-text-secondary">+</span>
+      <div className="min-w-0 flex-1">
+        <ModelSelector startupConfig={startupConfig} index={1} />
+      </div>
       <button
         className="text-token-text-secondary flex-shrink-0"
         type="button"

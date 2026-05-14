@@ -20,4 +20,9 @@ export interface SelectedValues {
 
 export interface ModelSelectorProps {
   startupConfig: TStartupConfig | undefined;
+  /**
+   * Conversation index this selector drives. Default 0 (the primary pane).
+   * Set to 1 (or higher) to drive a side-by-side / multi-convo pane.
+   */
+  index?: number;
 }

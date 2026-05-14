@@ -123,7 +123,7 @@ function ModelSelectorContent() {
   );
 }
 
-export default function ModelSelector({ startupConfig }: ModelSelectorProps) {
+export default function ModelSelector({ startupConfig, index = 0 }: ModelSelectorProps) {
   const interfaceConfig = startupConfig?.interface ?? defaultInterface;
   const modelSpecs = startupConfig?.modelSpecs?.list ?? [];
 
@@ -133,7 +133,7 @@ export default function ModelSelector({ startupConfig }: ModelSelectorProps) {
   }
 
   return (
-    <ModelSelectorChatProvider>
+    <ModelSelectorChatProvider index={index}>
       <ModelSelectorProvider startupConfig={startupConfig}>
         <ModelSelectorContent />
       </ModelSelectorProvider>
