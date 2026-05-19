@@ -39,7 +39,7 @@ export function applyPlanStepTransition(
 
 const PLAN_RE = /<<<NOVA_PLAN:([A-Za-z0-9+/=]+)>>>/g;
 const STEP_RE = /<<<NOVA_STEP:([^:>]+):(started|done|error)>>>/g;
-const COMBINED_RE = /<<<NOVA_(?:PLAN|STEP):[^>]+>>>/g;
+const COMBINED_RE = /<<<NOVA_(?:PLAN|STEP):[^>]*(?:>>>|$)/g;
 
 /**
  * Decode a base64-encoded UTF-8 JSON payload into a string preserving
@@ -131,6 +131,15 @@ export function stripStepMarkers(
   return text.replace(STEP_RE, '');
 }
 
+/**
+ * Strip plan + step markers from a string, no reporting. Tolerates
+ * truncated markers (e.g. `<<<NOVA_PLAN:W3si…JjYX` with no closing
+ * `>>>`) that land at end-of-text when the SSE stream errors mid-marker.
+ * kch 2026-05-18 repro: a litellm chunk-accounting 500 cut a stream
+ * after a long base64 NOVA_PLAN prefix had shipped but before its
+ * closing arrived, leaving the dangling prefix visible in the
+ * persisted message bubble until this guard.
+ */
 function scrubText(s: string | undefined): string | undefined {
   if (typeof s !== 'string') return s;
   if (!s.includes('<<<NOVA_PLAN:') && !s.includes('<<<NOVA_STEP:')) return s;

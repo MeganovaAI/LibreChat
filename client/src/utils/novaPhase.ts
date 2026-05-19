@@ -2,7 +2,7 @@ import { BookOpen, Globe, ListTodo, Sparkles, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { TMessage } from 'librechat-data-provider';
 
-const MARKER_RE = /<<<NOVA_PHASE:[^>]+>>>/g;
+const MARKER_RE = /<<<NOVA_PHASE:[^>]*(?:>>>|$)/g;
 
 type LocaleMap = Record<string, string>;
 type PhaseLabelConfig = string | LocaleMap | undefined;
@@ -156,6 +156,14 @@ export function phaseIcon(key: string): LucideIcon {
  * where we just want clean text (e.g. when scrubbing persisted messages
  * loaded from MongoDB or finalHandler payloads — we already moved past
  * the streaming-time phase tracking by then).
+ */
+/**
+ * Strip phase markers from a string, no phase reporting. Tolerates
+ * truncated markers (`<<<NOVA_PHASE:foo` with no closing `>>>`) that
+ * land at end-of-text when the SSE stream errors mid-marker — kch
+ * 2026-05-18 repro: litellm chunk-accounting 500 cuts the stream after
+ * the marker prefix has shipped but before its closing arrives, and the
+ * dangling prefix bleeds into the rendered bubble.
  */
 function scrubText(s: string | undefined): string | undefined {
   if (typeof s !== 'string' || !s.includes('<<<NOVA_PHASE:')) return s;

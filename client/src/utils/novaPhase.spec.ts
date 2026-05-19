@@ -1,4 +1,9 @@
-import { resolveLabel, stripPhaseMarkers, stripPhaseMarkersAll } from './novaPhase';
+import {
+  resolveLabel,
+  stripPhaseMarkers,
+  stripPhaseMarkersAll,
+  scrubPhaseMarkersFromMessage,
+} from './novaPhase';
 
 describe('stripPhaseMarkersAll', () => {
   it('reports each marker in order and returns cleaned text', () => {
@@ -46,6 +51,36 @@ describe('stripPhaseMarkers (single-latest)', () => {
     const seen: string[] = [];
     stripPhaseMarkers('hello world', (k) => seen.push(k));
     expect(seen).toEqual([]);
+  });
+});
+
+describe('scrubPhaseMarkersFromMessage truncation handling', () => {
+  it('strips a well-formed phase marker from .text', () => {
+    const m = { text: 'foo<<<NOVA_PHASE:planning>>>bar' } as { text: string };
+    scrubPhaseMarkersFromMessage(m as never);
+    expect(m.text).toBe('foobar');
+  });
+
+  it('strips a dangling phase marker at end of text (stream errored mid-marker)', () => {
+    const m = { text: 'partial answer<<<NOVA_PHASE:synth' } as { text: string };
+    scrubPhaseMarkersFromMessage(m as never);
+    expect(m.text).toBe('partial answer');
+  });
+
+  it('strips both a well-formed earlier marker AND a dangling final one', () => {
+    const m = {
+      text: '<<<NOVA_PHASE:planning>>>answer body<<<NOVA_PHASE:tool:gener',
+    } as { text: string };
+    scrubPhaseMarkersFromMessage(m as never);
+    expect(m.text).toBe('answer body');
+  });
+
+  it('strips dangling marker inside content[].text shape', () => {
+    const m = {
+      content: [{ type: 'text', text: 'body text<<<NOVA_PHASE:plann' }],
+    } as { content: { type: string; text: string }[] };
+    scrubPhaseMarkersFromMessage(m as never);
+    expect((m.content[0] as { text: string }).text).toBe('body text');
   });
 });
 
