@@ -129,8 +129,27 @@ export default function useSSE(
       });
     }
 
+    // Cached as a Set for O(1) lookup inside the per-frame `message` handler
+    // below. AG-UI emitters that aren't spec-strict about named events emit
+    // `data: {"type":"TOOL_CALL_START",...}` on the unnamed channel instead
+    // of `event: TOOL_CALL_START\ndata: {...}`. Nova OS's current emitter
+    // (internal/server/streaming/agui/translate.go) is one such producer.
+    // We accept both shapes so this consumer works against today's Nova OS
+    // AND against any future spec-strict emitter (CopilotKit, Mastra).
+    const agUiEventSet = new Set<string>(AG_UI_EVENTS);
+
     sse.addEventListener('message', (e: MessageEvent) => {
       const data = JSON.parse(e.data);
+
+      // AG-UI dual-shape detection: if the unnamed-frame payload carries a
+      // top-level `type` matching a known AG-UI event name, route to the
+      // AG-UI dispatcher instead of the chat-completions branches below.
+      // The set lookup makes this ~free for non-AG-UI traffic (a missing
+      // `type` field never matches).
+      if (typeof data?.type === 'string' && agUiEventSet.has(data.type)) {
+        agUiDispatch(data.type, data, { ...submission, userMessage } as EventSubmission);
+        return;
+      }
 
       if (data.final != null) {
         clearAllDrafts(submission.conversation?.conversationId);

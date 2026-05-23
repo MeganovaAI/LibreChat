@@ -215,4 +215,26 @@ describe('useAgUiHandler', () => {
       });
     }).not.toThrow();
   });
+
+  it('accepts type-in-JSON payload shape (dual-shape compatibility with non-strict emitters)', () => {
+    // Nova OS's current AG-UI emitter writes events as unnamed `data:` SSE
+    // frames with the discriminator in a top-level `type` field:
+    //   data: {"type":"TEXT_MESSAGE_CONTENT","delta":"hello"}\n\n
+    // The dispatcher accepts whatever event name useSSE picks out — when
+    // useSSE's dual-shape detector finds `data.type === "TEXT_MESSAGE_CONTENT"`,
+    // it passes that as eventName plus the full data object. The dispatcher
+    // must therefore ignore the redundant `type` field on the data.
+    const { result } = renderHook(() => useAgUiHandler(params()));
+
+    act(() => {
+      result.current.dispatch('RUN_STARTED', { type: 'RUN_STARTED', run_id: 'r-dual-1' }, submission);
+      result.current.dispatch(
+        'TEXT_MESSAGE_CONTENT',
+        { type: 'TEXT_MESSAGE_CONTENT', delta: 'hello' },
+        submission,
+      );
+    });
+
+    expect(mockMessageHandler).toHaveBeenLastCalledWith('hello', submission);
+  });
 });
