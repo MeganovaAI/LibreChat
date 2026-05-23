@@ -1099,13 +1099,27 @@ class AgentClient extends BaseClient {
         });
       }
     } catch (err) {
+      // Surface err.stack alongside err.message so the catch-all in the
+      // AgentClient post-processing path leaves something actionable in
+      // the operator log. Previously the logger printed err with default
+      // formatting, which on many Node loggers serializes to just the
+      // message (no stack). When a custom-endpoint upstream emits an
+      // unexpected response shape and crashes the post-stream chain, the
+      // user sees a generic ERROR content part with no way for the
+      // operator to identify the offending access — see MeganovaAI/nova-os#515.
       logger.error(
         '[api/server/controllers/agents/client.js #sendCompletion] Operation aborted',
+        err?.message,
+        '\nSTACK:',
+        err?.stack,
         err,
       );
       if (!abortController.signal.aborted) {
         logger.error(
           '[api/server/controllers/agents/client.js #sendCompletion] Unhandled error type',
+          err?.message,
+          '\nSTACK:',
+          err?.stack,
           err,
         );
         this.contentParts.push({
