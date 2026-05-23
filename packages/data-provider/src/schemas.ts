@@ -293,6 +293,16 @@ export const defaultAgentFormValues = {
     name: '',
     email: '',
   },
+  /** Optional allowlist. Only applies when `skills_enabled === true`.
+   *  Empty/undefined + enabled = full catalog; non-empty + enabled = narrow to ids. */
+  skills: undefined as string[] | undefined,
+  /** Master toggle for skill use on this agent. `true` activates skills
+   *  (full catalog unless `skills` narrows it). Anything else = inactive. */
+  skills_enabled: undefined as boolean | undefined,
+  /** `undefined` = feature disabled by default (no subagent tool injected). */
+  subagents: undefined as
+    | { enabled?: boolean; allowSelf?: boolean; agent_ids?: string[] }
+    | undefined,
 };
 
 export const ImageVisionTool: FunctionTool = {
@@ -362,7 +372,7 @@ export const googleSettings = {
   },
   maxOutputTokens: {
     min: 1 as const,
-    max: 64000 as const,
+    max: 65536 as const,
     step: 1 as const,
     default: 8192 as const,
   },
@@ -638,6 +648,8 @@ export const tMessageSchema = z.object({
   /** @deprecated */
   generation: z.string().nullable().optional(),
   isCreatedByUser: z.boolean(),
+  isTemporary: z.boolean().optional(),
+  expiredAt: z.string().nullable().optional(),
   error: z.boolean().optional(),
   clientTimestamp: z.string().optional(),
   createdAt: z
@@ -675,6 +687,23 @@ export const tMessageSchema = z.object({
         ),
     })
     .optional(),
+  /**
+   * Skill names the user invoked manually via the `$` popover on this turn.
+   * Purely UI metadata — `SkillPills` renders these above the message
+   * bubble so users can see which skills they asked for in history and on
+   * reload. Runtime resolution uses the top-level payload field with the
+   * same name. Empty / absent for model-invoked skills (shown as tool_call
+   * content parts on the assistant message instead).
+   */
+  manualSkills: z.array(z.string()).optional(),
+  /**
+   * Skill names auto-primed on this turn because their `always-apply`
+   * frontmatter flag is set. Persisted at turn time so the pinned-variant
+   * pills on the user bubble survive reload and stay stable across later
+   * edits to the skill's `alwaysApply` flag (the user bubble reflects
+   * what actually ran, not the current catalog).
+   */
+  alwaysAppliedSkills: z.array(z.string()).optional(),
 });
 
 export type MemoryArtifact = {
@@ -828,6 +857,7 @@ export const tConversationSchema = z.object({
   iconURL: z.string().nullable().optional(),
   /* temporary chat */
   expiredAt: z.string().nullable().optional(),
+  isTemporary: z.boolean().optional(),
   /* file token limits */
   fileTokenLimit: coerceNumber.optional(),
   /** @deprecated */
@@ -997,6 +1027,7 @@ export type TConversation = z.infer<typeof tConversationSchema> & {
 export const tSharedLinkSchema = z.object({
   conversationId: z.string(),
   shareId: z.string(),
+  targetMessageId: z.string().optional(),
   messages: z.array(z.string()),
   isPublic: z.boolean(),
   title: z.string(),
@@ -1220,6 +1251,11 @@ export const openAIBaseSchema = tConversationSchema.pick({
 });
 
 export const openAISchema = openAIBaseSchema
+  .transform((obj: Partial<TConversation>) => removeNullishValues(obj, true))
+  .catch(() => ({}));
+
+export const openRouterSchema = openAIBaseSchema
+  .merge(tConversationSchema.pick({ promptCache: true }))
   .transform((obj: Partial<TConversation>) => removeNullishValues(obj, true))
   .catch(() => ({}));
 

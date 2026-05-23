@@ -1497,6 +1497,7 @@ describe('Google Model Tests', () => {
     'gemini-3.1-pro-preview',
     'gemini-3.1-pro-preview-customtools',
     'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
     'gemini-2.5-pro',
     'gemini-2.5-flash',
     'gemini-2.5-flash-lite',
@@ -1544,6 +1545,7 @@ describe('Google Model Tests', () => {
       'gemini-3.1-pro-preview': 'gemini-3.1',
       'gemini-3.1-pro-preview-customtools': 'gemini-3.1',
       'gemini-3.1-flash-lite-preview': 'gemini-3.1-flash-lite',
+      'gemini-3.5-flash': 'gemini-3.5-flash',
       'gemini-2.5-pro': 'gemini-2.5-pro',
       'gemini-2.5-flash': 'gemini-2.5-flash',
       'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
@@ -1643,6 +1645,22 @@ describe('Google Model Tests', () => {
     );
     expect(getCacheMultiplier({ model, cacheType: 'read' })).toBe(
       cacheTokenValues['gemini-3.1-flash-lite'].read,
+    );
+  });
+
+  it('should return correct rates for Gemini 3.5 Flash', () => {
+    const model = 'gemini-3.5-flash';
+    expect(getMultiplier({ model, tokenType: 'prompt', endpoint: EModelEndpoint.google })).toBe(
+      tokenValues['gemini-3.5-flash'].prompt,
+    );
+    expect(getMultiplier({ model, tokenType: 'completion', endpoint: EModelEndpoint.google })).toBe(
+      tokenValues['gemini-3.5-flash'].completion,
+    );
+    expect(getCacheMultiplier({ model, cacheType: 'write' })).toBe(
+      cacheTokenValues['gemini-3.5-flash'].write,
+    );
+    expect(getCacheMultiplier({ model, cacheType: 'read' })).toBe(
+      cacheTokenValues['gemini-3.5-flash'].read,
     );
   });
 });
@@ -2322,14 +2340,14 @@ describe('Claude Model Tests', () => {
 });
 
 describe('Premium Token Pricing', () => {
-  const premiumModel = 'claude-opus-4-6';
+  const premiumModel = 'gemini-3.1';
   const premiumEntry = premiumTokenValues[premiumModel];
   const { threshold } = premiumEntry;
   const belowThreshold = threshold - 1;
   const aboveThreshold = threshold + 1;
   const wellAboveThreshold = threshold * 2;
 
-  it('should have premium pricing defined for claude-opus-4-6', () => {
+  it('should have premium pricing defined for gemini-3.1', () => {
     expect(premiumEntry).toBeDefined();
     expect(premiumEntry.threshold).toBeDefined();
     expect(premiumEntry.prompt).toBeDefined();
@@ -2338,14 +2356,26 @@ describe('Premium Token Pricing', () => {
     expect(premiumEntry.completion).toBeGreaterThan(tokenValues[premiumModel].completion);
   });
 
-  it('should have premium pricing defined for claude-opus-4-7', () => {
-    const entry = premiumTokenValues['claude-opus-4-7'];
-    expect(entry).toBeDefined();
-    expect(entry.threshold).toBe(200000);
-    expect(entry.prompt).toBe(10);
-    expect(entry.completion).toBe(37.5);
-    expect(entry.prompt).toBeGreaterThan(tokenValues['claude-opus-4-7'].prompt);
-    expect(entry.completion).toBeGreaterThan(tokenValues['claude-opus-4-7'].completion);
+  it('should not apply premium pricing to Claude 1M GA models', () => {
+    const claudeModels = ['claude-opus-4-6', 'claude-opus-4-7', 'claude-sonnet-4-6'];
+    claudeModels.forEach((model) => {
+      expect(premiumTokenValues[model]).toBeUndefined();
+      expect(getPremiumRate(model, 'prompt', wellAboveThreshold)).toBeNull();
+      expect(
+        getMultiplier({
+          model,
+          tokenType: 'prompt',
+          inputTokenCount: wellAboveThreshold,
+        }),
+      ).toBe(tokenValues[model].prompt);
+      expect(
+        getMultiplier({
+          model,
+          tokenType: 'completion',
+          inputTokenCount: wellAboveThreshold,
+        }),
+      ).toBe(tokenValues[model].completion);
+    });
   });
 
   it('should return null from getPremiumRate when inputTokenCount is below threshold', () => {

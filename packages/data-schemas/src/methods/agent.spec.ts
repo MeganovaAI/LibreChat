@@ -3334,6 +3334,59 @@ describe('Support Contact Field', () => {
       expect(result.data[0].name).toBe('Agent A1');
     });
 
+    test('should omit skill configuration from the default list projection', async () => {
+      const targetSkillIds = [
+        new mongoose.Types.ObjectId().toString(),
+        new mongoose.Types.ObjectId().toString(),
+      ];
+      const scopedAgent = await createAgent({
+        id: `agent_${uuidv4().slice(0, 12)}`,
+        name: 'Scoped Agent',
+        description: 'Agent with configured skill scope',
+        provider: 'openai',
+        model: 'gpt-4',
+        author: userA,
+        skills: targetSkillIds,
+        skills_enabled: true,
+      });
+
+      const result = await getListAgentsByAccess({
+        accessibleIds: [scopedAgent._id] as mongoose.Types.ObjectId[],
+        otherParams: {},
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].skills).toBeUndefined();
+      expect(result.data[0].skills_enabled).toBeUndefined();
+    });
+
+    test('should include skill configuration only when explicitly requested', async () => {
+      const targetSkillIds = [
+        new mongoose.Types.ObjectId().toString(),
+        new mongoose.Types.ObjectId().toString(),
+      ];
+      const scopedAgent = await createAgent({
+        id: `agent_${uuidv4().slice(0, 12)}`,
+        name: 'Scoped Agent',
+        description: 'Agent with configured skill scope',
+        provider: 'openai',
+        model: 'gpt-4',
+        author: userA,
+        skills: targetSkillIds,
+        skills_enabled: true,
+      });
+
+      const result = await getListAgentsByAccess({
+        accessibleIds: [scopedAgent._id] as mongoose.Types.ObjectId[],
+        otherParams: {},
+        includeSkillConfig: true,
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].skills).toEqual(targetSkillIds);
+      expect(result.data[0].skills_enabled).toBe(true);
+    });
+
     test('should return multiple accessible agents when provided', async () => {
       // Give User B access to two of User A's agents
       const accessibleIds = [agentA1._id, agentA3._id] as mongoose.Types.ObjectId[];
