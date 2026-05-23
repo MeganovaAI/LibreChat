@@ -9,6 +9,7 @@ import type { TResData } from '~/common';
 import { useGetStartupConfig, useGetUserBalance } from '~/data-provider';
 import { useAuthContext } from '~/hooks/AuthContext';
 import useEventHandlers from './useEventHandlers';
+import useAgUiHandler, { AG_UI_EVENTS } from './useAgUiHandler';
 import { clearAllDrafts } from '~/utils';
 import store from '~/store';
 
@@ -67,6 +68,17 @@ export default function useSSE(
     resetLatestMessage,
   });
 
+  // AG-UI consumer (Nova OS #370 streaming protocol). Coexists with the
+  // chat-completions `message` handler above — AG-UI events arrive as named
+  // SSE events (`event: TOOL_CALL_START\ndata: ...`) and never fire on the
+  // unnamed `message` channel. Both paths are mutually inert; no mode flag
+  // needed.
+  const { dispatch: agUiDispatch, reset: agUiReset } = useAgUiHandler({
+    messageHandler,
+    finalHandler,
+    errorHandler,
+  });
+
   const { data: startupConfig } = useGetStartupConfig();
   const balanceQuery = useGetUserBalance({
     enabled: !!isAuthenticated && startupConfig?.balance?.enabled,
@@ -99,6 +111,23 @@ export default function useSSE(
         console.error(error);
       }
     });
+
+    // AG-UI named-event listeners (Nova OS #370).
+    // sse.js fires these only when the server emits `event: <NAME>\ndata: ...`;
+    // the chat-completions path uses the unnamed `data:` frame channel above.
+    agUiReset();
+    for (const eventName of AG_UI_EVENTS) {
+      sse.addEventListener(eventName, (e: MessageEvent) => {
+        let data: unknown = {};
+        try {
+          data = e.data ? JSON.parse(e.data) : {};
+        } catch (err) {
+          console.error(`[ag-ui] failed to parse ${eventName} payload:`, err, e.data);
+          return;
+        }
+        agUiDispatch(eventName, data, { ...submission, userMessage } as EventSubmission);
+      });
+    }
 
     sse.addEventListener('message', (e: MessageEvent) => {
       const data = JSON.parse(e.data);
