@@ -5,3 +5,5 @@ export { default as useResumeOnLoad } from './useResumeOnLoad';
 export { default as useStepHandler } from './useStepHandler';
 export { default as useContentHandler } from './useContentHandler';
 export { default as useAttachmentHandler } from './useAttachmentHandler';
+export { default as useAgUiHandler, AG_UI_EVENTS } from './useAgUiHandler';
+export type { AgUiEvent, AgUiEventName } from './useAgUiHandler';
