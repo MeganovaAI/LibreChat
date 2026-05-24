@@ -35,6 +35,10 @@ const { LB_QueueAsyncCall } = require('~/server/utils/queue');
 const { getStrategyFunctions } = require('./strategies');
 const { determineFileType } = require('~/server/utils');
 const { STTService } = require('./Audio/STTService');
+const {
+  findProviderFilesEndpoint,
+  forwardFileToProvider,
+} = require('./Provider/forwardToProviderFiles');
 const db = require('~/models');
 
 /**
@@ -480,6 +484,82 @@ const processAgentFileUpload = async ({ req, res, metadata }) => {
   const { agent_id, tool_resource, file_id, temp_file_id = null } = metadata;
 
   let messageAttachment = !!metadata.message_file;
+
+  // Provider-API forwarding gate (nova-os#516 round-trip): when this is a
+  // message attachment AND no tool_resource is set (i.e. the user clicked
+  // "Upload to Provider" rather than "Upload as Text" / "File Search"),
+  // AND the target endpoint declares providerFileApi:true in
+  // librechat.yaml, forward the multipart body to <baseURL>/files instead
+  // of saving locally. Provider response is returned unchanged so the
+  // client sees the OpenAI File object shape.
+  //
+  // The gate is intentionally narrow: tool_resource:context (OCR text
+  // extraction), tool_resource:file_search (RAG vector DB), and
+  // tool_resource:execute_code paths all keep their existing behaviour.
+  // Only the previously-unmappable "Upload to Provider" path is
+  // re-routed.
+  if (messageAttachment && !tool_resource) {
+    const providerEndpoint = findProviderFilesEndpoint(appConfig, metadata.endpoint);
+    if (providerEndpoint) {
+      try {
+        const providerResponse = await forwardFileToProvider({
+          req,
+          endpointConfig: providerEndpoint,
+          purpose: metadata.purpose || 'assistants',
+        });
+        // The LibreChat client tracks file uploads by `file_id` and unblocks
+        // the Send button only when the response matches the TFileUpload
+        // shape (file_id, temp_file_id, bytes, filename, filepath, embedded,
+        // object:'file', type, source). The OpenAI Files API shape we got
+        // back from the provider is close but not identical, so we adapt
+        // it here AND persist a stub LibreChat file record so subsequent
+        // chats / re-renders can resolve the file_id consistently.
+        const providerFileId = (providerResponse?.id || '').replace(/^file-/, '');
+        const fileInfo = removeNullishValues({
+          file_id: providerFileId || file_id,
+          temp_file_id: temp_file_id || file_id,
+          user: req.user.id,
+          type: file.mimetype,
+          bytes: providerResponse?.bytes ?? file.size,
+          filename: file.originalname,
+          // Filepath points at the provider — LibreChat won't serve bytes
+          // for this file (the provider owns them), but the field is
+          // required by TFile and visible in audit logs.
+          filepath: `${providerEndpoint.baseURL.replace(/\/+$/, '')}/files/file-${providerFileId}`,
+          source: FileSources.local, // closest existing enum; bytes are not actually local
+          embedded: true, // signals "already indexed on the provider side"
+          context: messageAttachment ? FileContext.message_attachment : FileContext.agents,
+          model: messageAttachment ? undefined : req.body.model,
+        });
+        let saved = fileInfo;
+        try {
+          saved = await db.createFile(fileInfo, true);
+        } catch (dbErr) {
+          // Non-fatal: if the DB write fails the client still gets the
+          // shape it needs and the file lives on the provider. Audit
+          // surface only.
+          logger.warn(
+            `[/files] provider file forwarded but DB record failed for ${file.originalname}: ${dbErr.message}`,
+          );
+        }
+        logger.info(
+          `[/files] forwarded "${file.originalname}" to provider ${providerEndpoint.name} (${providerResponse?.id || 'no-id'})`,
+        );
+        return res.status(200).json({
+          message: 'File forwarded to provider successfully',
+          ...saved,
+          provider_files_api: true,
+        });
+      } catch (err) {
+        logger.error(
+          `[/files] provider forward failed for endpoint ${providerEndpoint.name}: ${err.message}`,
+        );
+        return res.status(502).json({
+          message: `Failed to upload to provider ${providerEndpoint.name}: ${err.message}`,
+        });
+      }
+    }
+  }
 
   if (agent_id && !tool_resource && !messageAttachment) {
     throw new Error('No tool resource provided for agent file upload');
