@@ -50,6 +50,15 @@ RUN \
 # Node API setup
 EXPOSE 3080
 ENV HOST=0.0.0.0
+
+# nova-os#521: OIDC issuer auto-discovery. The entrypoint script fetches
+# Nova OS's /.well-known/openid-configuration at container start and
+# exports OPENID_ISSUER from the response so it always byte-matches
+# whatever Nova OS advertises — eliminating the silent OIDC failure
+# class where these were configured independently. Operator sets
+# NOVA_OS_HOST instead of OPENID_ISSUER directly. Bypass with
+# NOVA_OS_OIDC_AUTODISCOVER=0 for static-issuer deployments.
+ENTRYPOINT ["/app/scripts/nova-os-issuer-autodiscover.sh"]
 CMD ["npm", "run", "backend"]
 
 # Optional: for client with nginx routing
