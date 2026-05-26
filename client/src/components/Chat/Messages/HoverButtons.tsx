@@ -8,6 +8,7 @@ import MessageAudio from './MessageAudio';
 import Feedback from './Feedback';
 import { cn } from '~/utils';
 import store from '~/store';
+import { FlagButton, useNovaPersonasEnabled, getPortalBase } from '~/components/NovaPersonas';
 
 type THoverButtons = {
   isEditing: boolean;
@@ -126,6 +127,7 @@ const HoverButtons = ({
   const localize = useLocalize();
   const [isCopied, setIsCopied] = useState(false);
   const [TextToSpeech] = useRecoilState<boolean>(store.textToSpeech);
+  const novaEnabled = useNovaPersonasEnabled();
 
   const endpoint = useMemo(() => {
     if (!conversation) {
@@ -242,6 +244,15 @@ const HoverButtons = ({
         latestMessageId={latestMessageId}
         isLast={isLast}
       />
+
+      {/* Nova Personas: Flag Button (assistant turns only, behind feature flag) */}
+      {!isCreatedByUser && novaEnabled && conversation?.conversationId != null && (
+        <FlagButton
+          sessionId={conversation.conversationId}
+          turnId={index}
+          portalBase={getPortalBase()}
+        />
+      )}
 
       {/* Feedback Buttons */}
       {!isCreatedByUser && handleFeedback != null && (

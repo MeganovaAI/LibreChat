@@ -1,10 +1,11 @@
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useState, useEffect } from 'react';
 import { useRecoilValue } from 'recoil';
 import { useForm } from 'react-hook-form';
 import { Spinner } from '@librechat/client';
 import { useParams } from 'react-router-dom';
 import { Constants, buildTree } from 'librechat-data-provider';
 import type { TMessage } from 'librechat-data-provider';
+import type { NovaPersonasSessionMetadata } from 'librechat-data-provider';
 import type { ChatFormValues } from '~/common';
 import { ChatContext, AddedChatContext, ChatFormProvider, useFileMapContext } from '~/Providers';
 import { useAddedResponse, useResumeOnLoad, useAdaptiveSSE, useChatHelpers } from '~/hooks';
@@ -18,6 +19,13 @@ import Header from './Header';
 import Footer from './Footer';
 import { cn } from '~/utils';
 import store from '~/store';
+import {
+  SyntheticBanner,
+  RatingWidget,
+  useNovaPersonasEnabled,
+  getPortalBase,
+  readSessionMetadata,
+} from '~/components/NovaPersonas';
 
 function LoadingSpinner() {
   return (
@@ -60,6 +68,28 @@ function ChatView({ index = 0 }: { index?: number }) {
   // Wait for messages to load before resuming to avoid race condition
   useResumeOnLoad(conversationId, chatHelpers.getMessages, index, !isLoading);
 
+  // Nova Personas: session metadata + rating modal state
+  const novaEnabled = useNovaPersonasEnabled();
+  const [novaMetadata, setNovaMetadata] = useState<NovaPersonasSessionMetadata>({});
+  const [ratingOpen, setRatingOpen] = useState(false);
+
+  useEffect(() => {
+    if (!novaEnabled || !conversationId) return;
+    readSessionMetadata(
+      { id: conversationId },
+      { portalBase: getPortalBase() },
+    ).then(setNovaMetadata);
+  }, [novaEnabled, conversationId]);
+
+  useEffect(() => {
+    return () => {
+      if (novaEnabled && (novaMetadata.session_purpose === 'capture' || novaMetadata.session_purpose === 'training')) {
+        setRatingOpen(true);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
   let content: JSX.Element | null | undefined;
   const isLandingPage =
     (!messagesTree || messagesTree.length === 0) &&
@@ -83,6 +113,23 @@ function ChatView({ index = 0 }: { index?: number }) {
           <Presentation>
             <div className="relative flex h-full w-full flex-col">
               <Header />
+              {novaEnabled && (
+                <SyntheticBanner
+                  metadata={novaMetadata}
+                  stealthMode={novaMetadata.stealth_mode}
+                />
+              )}
+              {novaEnabled && (
+                <RatingWidget
+                  open={ratingOpen}
+                  sessionId={conversationId ?? ''}
+                  portalBase={getPortalBase()}
+                  packId={novaMetadata.pack_id ?? ''}
+                  canonical={novaMetadata.persona_id ?? ''}
+                  variantCode={novaMetadata.variant_code}
+                  onClose={() => setRatingOpen(false)}
+                />
+              )}
               <>
                 <div
                   className={cn(

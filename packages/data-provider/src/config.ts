@@ -628,6 +628,21 @@ export const endpointSchema = baseEndpointSchema.merge(
       .optional(),
     directEndpoint: z.boolean().optional(),
     titleMessageRole: z.enum(['system', 'user', 'assistant']).optional(),
+    /**
+     * When true, "Upload to Provider" (the message-attachment path with no
+     * tool_resource) forwards the multipart body to <baseURL>/files with
+     * `Authorization: Bearer <apiKey>` instead of saving the file to
+     * LibreChat's local storage. The provider response is returned to
+     * the client unchanged.
+     *
+     * Use for custom OpenAI-compatible endpoints (e.g. Nova OS) that
+     * implement the standard POST /v1/files endpoint and index uploads
+     * into their own knowledge store. Without this flag the file lands
+     * in LibreChat's /uploads dir, never reaches the provider, and the
+     * provider's document_retrieval / file_search tools have nothing to
+     * search.
+     */
+    providerFileApi: z.boolean().optional(),
   }),
 );
 
